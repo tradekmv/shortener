@@ -4,6 +4,13 @@ import (
 	"sync"
 )
 
+// Storage определяет интерфейс для хранилища URL
+type Storage interface {
+	Save(originalURL string) string
+	Get(shortID string) (string, bool)
+}
+
+// Shortener реализует интерфейс Storage с использованием in-memory хранилища
 type Shortener struct {
 	mu      sync.RWMutex
 	counter int64
