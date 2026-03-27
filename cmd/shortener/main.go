@@ -1,27 +1,37 @@
 package main
 
 import (
+	"log"
 	"net/http"
+	"os"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/go-chi/chi/v5/middleware"
+	"github.com/tradekmv/shortener.git/internal/config"
 	"github.com/tradekmv/shortener.git/internal/handler"
 	"github.com/tradekmv/shortener.git/internal/repository/storage"
 )
 
 func main() {
+	cfg, err := config.Load()
+	if err != nil {
+		log.Printf("Error parsing flags: %v", err)
+		os.Exit(1)
+	}
+
 	r := chi.NewRouter()
 
 	r.Use(middleware.Logger)
 
 	store := storage.New()
-	h := handler.New(store, "http://localhost:8080")
+	h := handler.New(store, cfg.BaseURL)
 
 	r.Post("/", h.PostHandler)
 	r.Get("/{id}", h.GetHandler)
 
-	err := http.ListenAndServe("localhost:8080", r)
+	addr := cfg.ServerAddress
+	err = http.ListenAndServe(addr, r)
 	if err != nil {
-		panic(err)
+		log.Printf("Server error: %v", err)
 	}
 }

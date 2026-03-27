@@ -12,7 +12,7 @@ import (
 
 // ShortenerHandler обрабатывает HTTP-запросы для сокращения URL
 type ShortenerHandler struct {
-	storage storage.Storage // используем интерфейс вместо конкретного типа
+	storage storage.Storage
 	baseURL string
 }
 
