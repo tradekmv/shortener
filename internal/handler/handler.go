@@ -10,12 +10,13 @@ import (
 	"github.com/tradekmv/shortener.git/internal/repository/storage"
 )
 
+// ShortenerHandler обрабатывает HTTP-запросы для сокращения URL
 type ShortenerHandler struct {
-	storage *storage.Shortener
+	storage storage.Storage // используем интерфейс вместо конкретного типа
 	baseURL string
 }
 
-func New(storage *storage.Shortener, baseURL string) *ShortenerHandler {
+func New(storage storage.Storage, baseURL string) *ShortenerHandler {
 	return &ShortenerHandler{
 		storage: storage,
 		baseURL: baseURL,
