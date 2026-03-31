@@ -1,56 +1,58 @@
 package handler
 
 import (
-	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"strings"
 
-	"github.com/tradekmv/shortener.git/internal/repository/storage"
+	"github.com/tradekmv/shortener.git/internal/service"
 )
 
 // ShortenerHandler обрабатывает HTTP-запросы для сокращения URL
 type ShortenerHandler struct {
-	storage storage.Storage
+	service *service.Service
 	baseURL string
 }
 
-func New(storage storage.Storage, baseURL string) *ShortenerHandler {
+func New(service *service.Service, baseURL string) *ShortenerHandler {
 	return &ShortenerHandler{
-		storage: storage,
+		service: service,
 		baseURL: baseURL,
 	}
 }
 
 // PostHandler обрабатывает POST запросы для создания короткой ссылки
 func (h *ShortenerHandler) PostHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "Only POST method allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
-		http.Error(w, "Failed to read body", http.StatusBadRequest)
+		http.Error(w, "Не удалось прочитать тело запроса", http.StatusBadRequest)
 		return
 	}
-	defer func(Body io.ReadCloser) {
-		err := Body.Close()
-		if err != nil {
-			log.Printf("Error closing body: %v", err)
+	defer func(body io.ReadCloser) {
+		if err := body.Close(); err != nil {
+			log.Printf("Ошибка закрытия тела запроса: %v", err)
 		}
 	}(r.Body)
 
 	originalURL := strings.TrimSpace(string(body))
 	if originalURL == "" {
-		http.Error(w, "URL cannot be empty", http.StatusBadRequest)
+		http.Error(w, "URL не может быть пустым", http.StatusBadRequest)
 		return
 	}
 
-	shortID := h.storage.Save(originalURL)
+	shortID, err := h.service.Save(originalURL)
+	if err != nil {
+		http.Error(w, "Не удалось сохранить URL", http.StatusInternalServerError)
+		return
+	}
 
-	shortURL := fmt.Sprintf("%s/%s", h.baseURL, shortID)
+	shortURL, err := url.JoinPath(h.baseURL, shortID)
+	if err != nil {
+		http.Error(w, "Не удалось построить короткий URL", http.StatusInternalServerError)
+		return
+	}
 
 	w.Header().Set("Content-Type", "text/plain")
 	w.WriteHeader(http.StatusCreated)
@@ -62,20 +64,15 @@ func (h *ShortenerHandler) PostHandler(w http.ResponseWriter, r *http.Request) {
 
 // GetHandler обрабатывает GET запросы для редиректа по короткому ID
 func (h *ShortenerHandler) GetHandler(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		http.Error(w, "Only GET method allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
 	shortID := r.PathValue("id")
 	if shortID == "" {
-		http.Error(w, "ID is required", http.StatusBadRequest)
+		http.Error(w, "ID обязателен", http.StatusBadRequest)
 		return
 	}
 
-	originalURL, exists := h.storage.Get(shortID)
-	if !exists {
-		http.Error(w, "URL not found", http.StatusNotFound)
+	originalURL, ok := h.service.Get(shortID)
+	if !ok {
+		http.Error(w, "URL не найден", http.StatusNotFound)
 		return
 	}
 

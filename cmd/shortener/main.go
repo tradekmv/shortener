@@ -10,12 +10,13 @@ import (
 	"github.com/tradekmv/shortener.git/internal/config"
 	"github.com/tradekmv/shortener.git/internal/handler"
 	"github.com/tradekmv/shortener.git/internal/repository/storage"
+	"github.com/tradekmv/shortener.git/internal/service"
 )
 
 func main() {
 	cfg, err := config.Load()
 	if err != nil {
-		log.Printf("Error parsing flags: %v", err)
+		log.Printf("Ошибка парсинга флагов: %v", err)
 		os.Exit(1)
 	}
 
@@ -24,7 +25,8 @@ func main() {
 	r.Use(middleware.Logger)
 
 	store := storage.New()
-	h := handler.New(store, cfg.BaseURL)
+	svc := service.NewService(store)
+	h := handler.New(svc, cfg.BaseURL)
 
 	r.Post("/", h.PostHandler)
 	r.Get("/{id}", h.GetHandler)
@@ -32,6 +34,6 @@ func main() {
 	addr := cfg.ServerAddress
 	err = http.ListenAndServe(addr, r)
 	if err != nil {
-		log.Printf("Server error: %v", err)
+		log.Printf("Ошибка сервера: %v", err)
 	}
 }

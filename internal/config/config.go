@@ -2,6 +2,7 @@ package config
 
 import (
 	"flag"
+	"fmt"
 	"os"
 )
 
@@ -24,7 +25,7 @@ func Load() (*Config, error) {
 
 	err := flag.CommandLine.Parse(os.Args[1:])
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("ошибка парсинга флагов: %w", err)
 	}
 
 	return cfg, nil
