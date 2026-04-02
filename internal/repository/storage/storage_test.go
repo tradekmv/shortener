@@ -7,10 +7,17 @@ import (
 
 func TestShortener_Save(t *testing.T) {
 	s := New()
-	s.Save("abc123", "https://example.com")
+	err := s.Save("abc123", "https://example.com")
+	if err != nil {
+		t.Errorf("неожиданная ошибка: %v", err)
+	}
 
-	if !s.Exists("abc123") {
+	url, ok := s.Get("abc123")
+	if !ok {
 		t.Errorf("ожидалось, что ключ 'abc123' существует")
+	}
+	if url != "https://example.com" {
+		t.Errorf("ожидался URL 'https://example.com', получен '%s'", url)
 	}
 }
 
@@ -18,8 +25,8 @@ func TestShortener_Get_Found(t *testing.T) {
 	s := New()
 	s.Save("abc123", "https://example.com")
 
-	url, exists := s.Get("abc123")
-	if !exists {
+	url, ok := s.Get("abc123")
+	if !ok {
 		t.Errorf("ожидалось, что ключ 'abc123' существует")
 	}
 	if url != "https://example.com" {
@@ -30,26 +37,35 @@ func TestShortener_Get_Found(t *testing.T) {
 func TestShortener_Get_NotFound(t *testing.T) {
 	s := New()
 
-	_, exists := s.Get("nonexistent")
-	if exists {
+	_, ok := s.Get("nonexistent")
+	if ok {
 		t.Errorf("ожидалось, что ключ 'nonexistent' не существует")
 	}
 }
 
-func TestShortener_Exists_True(t *testing.T) {
+func TestShortener_SaveIfNotExists_Success(t *testing.T) {
+	s := New()
+	err := s.SaveIfNotExists("abc123", "https://example.com")
+	if err != nil {
+		t.Errorf("неожиданная ошибка: %v", err)
+	}
+}
+
+func TestShortener_SaveIfNotExists_AlreadyExists(t *testing.T) {
 	s := New()
 	s.Save("abc123", "https://example.com")
 
-	if !s.Exists("abc123") {
+	err := s.SaveIfNotExists("abc123", "https://other.com")
+	if err != ErrAlreadyExists {
+		t.Errorf("ожидалась ошибка ErrAlreadyExists, получена: %v", err)
+	}
+
+	url, ok := s.Get("abc123")
+	if !ok {
 		t.Errorf("ожидалось, что ключ 'abc123' существует")
 	}
-}
-
-func TestShortener_Exists_False(t *testing.T) {
-	s := New()
-
-	if s.Exists("nonexistent") {
-		t.Errorf("ожидалось, что ключ 'nonexistent' не существует")
+	if url != "https://example.com" {
+		t.Errorf("ожидался оригинальный URL 'https://example.com', получен '%s'", url)
 	}
 }
 
