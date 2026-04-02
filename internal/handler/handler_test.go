@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tradekmv/shortener.git/internal/repository/storage"
+	"github.com/tradekmv/shortener.git/internal/repository/mock"
 	"github.com/tradekmv/shortener.git/internal/service"
 	"go.uber.org/mock/gomock"
 )
@@ -15,9 +15,8 @@ func TestPostHandler_Success(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockStorage := storage.NewMockStorage(ctrl)
-	mockStorage.EXPECT().Exists(gomock.Any()).Return(false)
-	mockStorage.EXPECT().Save(gomock.Any(), "https://example.com")
+	mockStorage := mock.NewMockStorage(ctrl)
+	mockStorage.EXPECT().SaveIfNotExists(gomock.Any(), "https://example.com").Return(nil)
 
 	svc := service.NewService(mockStorage)
 	h := New(svc, "http://localhost:8080")
@@ -41,7 +40,7 @@ func TestPostHandler_EmptyBody(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockStorage := storage.NewMockStorage(ctrl)
+	mockStorage := mock.NewMockStorage(ctrl)
 	svc := service.NewService(mockStorage)
 	h := New(svc, "http://localhost:8080")
 
@@ -59,7 +58,7 @@ func TestGetHandler_Success(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockStorage := storage.NewMockStorage(ctrl)
+	mockStorage := mock.NewMockStorage(ctrl)
 	mockStorage.EXPECT().Get("abc123").Return("https://example.com", true)
 
 	svc := service.NewService(mockStorage)
@@ -87,7 +86,7 @@ func TestGetHandler_NotFound(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockStorage := storage.NewMockStorage(ctrl)
+	mockStorage := mock.NewMockStorage(ctrl)
 	mockStorage.EXPECT().Get("nonexistent").Return("", false)
 
 	svc := service.NewService(mockStorage)
