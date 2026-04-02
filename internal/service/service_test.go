@@ -1,6 +1,7 @@
 package service
 
 import (
+	"errors"
 	"testing"
 )
 
@@ -49,8 +50,6 @@ func TestSave_Success(t *testing.T) {
 }
 
 func TestSave_AnyInput(t *testing.T) {
-	// Сервис не валидирует URL - валидация происходит в обработчике
-	// Этот тест проверяет, что сервис сохраняет любые полученные данные
 	mockStorage := newMockStorage()
 	svc := NewService(mockStorage)
 
@@ -62,7 +61,6 @@ func TestSave_AnyInput(t *testing.T) {
 		t.Errorf("ожидался непустой ID")
 	}
 
-	// Проверяем, что URL был сохранен
 	url, found := mockStorage.Get(id)
 	if !found {
 		t.Errorf("ожидалось, что URL будет сохранен")
@@ -160,16 +158,20 @@ func newMockStorage() *mockStorage {
 	return &mockStorage{data: make(map[string]string)}
 }
 
-func (m *mockStorage) Save(shortID, originalURL string) {
+func (m *mockStorage) Save(shortID, originalURL string) error {
 	m.data[shortID] = originalURL
+	return nil
 }
 
 func (m *mockStorage) Get(shortID string) (string, bool) {
-	url, exists := m.data[shortID]
-	return url, exists
+	url, ok := m.data[shortID]
+	return url, ok
 }
 
-func (m *mockStorage) Exists(shortID string) bool {
-	_, exists := m.data[shortID]
-	return exists
+func (m *mockStorage) SaveIfNotExists(shortID, originalURL string) error {
+	if _, ok := m.data[shortID]; ok {
+		return errors.New("Короткая ссылка уже существует")
+	}
+	m.data[shortID] = originalURL
+	return nil
 }

@@ -1,13 +1,16 @@
 package storage
 
 import (
+	"errors"
 	"sync"
 )
 
+var ErrAlreadyExists = errors.New("короткая ссылка уже существует")
+
 type Storage interface {
-	Save(shortID, originalURL string)
+	Save(shortID, originalURL string) error
 	Get(shortID string) (string, bool)
-	Exists(shortID string) bool
+	SaveIfNotExists(shortID, originalURL string) error
 }
 
 type Shortener struct {
@@ -21,22 +24,28 @@ func New() *Shortener {
 	}
 }
 
-func (s *Shortener) Save(shortID, originalURL string) {
+func (s *Shortener) Save(shortID, originalURL string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.storage[shortID] = originalURL
+	return nil
 }
 
 func (s *Shortener) Get(shortID string) (string, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	originalURL, exists := s.storage[shortID]
-	return originalURL, exists
+	originalURL, ok := s.storage[shortID]
+	return originalURL, ok
 }
 
-func (s *Shortener) Exists(shortID string) bool {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	_, exists := s.storage[shortID]
-	return exists
+func (s *Shortener) SaveIfNotExists(shortID, originalURL string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if _, ok := s.storage[shortID]; ok {
+		return ErrAlreadyExists
+	}
+
+	s.storage[shortID] = originalURL
+	return nil
 }

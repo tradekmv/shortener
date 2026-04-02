@@ -4,7 +4,6 @@ import (
 	"crypto/rand"
 	"errors"
 	"strings"
-	"sync"
 
 	"github.com/tradekmv/shortener.git/internal/repository/storage"
 )
@@ -19,7 +18,6 @@ var ErrMaxRetriesExceeded = errors.New("не удалось сгенериров
 
 type Service struct {
 	storage storage.Storage
-	mu      sync.Mutex
 }
 
 func NewService(storage storage.Storage) *Service {
@@ -27,16 +25,19 @@ func NewService(storage storage.Storage) *Service {
 }
 
 func (s *Service) Save(originalURL string) (string, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
 	for i := 0; i < maxAttempts; i++ {
 		id, err := generateID(length)
 		if err != nil {
 			return "", err
 		}
-		if !s.storage.Exists(id) {
-			s.storage.Save(id, originalURL)
+
+		err = s.storage.SaveIfNotExists(id, originalURL)
+		if err == nil {
 			return id, nil
+		}
+
+		if !errors.Is(err, storage.ErrAlreadyExists) {
+			return "", err
 		}
 	}
 	return "", ErrMaxRetriesExceeded
@@ -58,6 +59,6 @@ func generateID(n int) (string, error) {
 	return string(b), nil
 }
 
-func IsURL(s string) bool {
-	return strings.HasPrefix(s, "http://") || strings.HasPrefix(s, "https://")
+func IsURL(str string) bool {
+	return strings.HasPrefix(str, "http://") || strings.HasPrefix(str, "https://")
 }
