@@ -62,17 +62,3 @@ func (mr *MockStorageMockRecorder) Save(shortID, originalURL any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Save", reflect.TypeOf((*MockStorage)(nil).Save), shortID, originalURL)
 }
-
-// SaveIfNotExists mocks base method.
-func (m *MockStorage) SaveIfNotExists(shortID, originalURL string) error {
-	m.ctrl.T.Helper()
-	ret := m.ctrl.Call(m, "SaveIfNotExists", shortID, originalURL)
-	ret0, _ := ret[0].(error)
-	return ret0
-}
-
-// SaveIfNotExists indicates an expected call of SaveIfNotExists.
-func (mr *MockStorageMockRecorder) SaveIfNotExists(shortID, originalURL any) *gomock.Call {
-	mr.mock.ctrl.T.Helper()
-	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SaveIfNotExists", reflect.TypeOf((*MockStorage)(nil).SaveIfNotExists), shortID, originalURL)
-}

@@ -1,8 +1,10 @@
 package service
 
 import (
-	"errors"
 	"testing"
+
+	"github.com/tradekmv/shortener.git/internal/repository/mock"
+	"go.uber.org/mock/gomock"
 )
 
 func TestIsURL_ValidHTTP(t *testing.T) {
@@ -34,8 +36,15 @@ func TestIsURL_Invalid(t *testing.T) {
 }
 
 func TestSave_Success(t *testing.T) {
-	mockStorage := newMockStorage()
-	svc := NewService(mockStorage)
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockRepo := mock.NewMockStorage(ctrl)
+	svc := NewService(mockRepo)
+
+	mockRepo.EXPECT().
+		Save(gomock.Any(), "https://example.com").
+		Return(nil)
 
 	id, err := svc.Save("https://example.com")
 	if err != nil {
@@ -50,8 +59,15 @@ func TestSave_Success(t *testing.T) {
 }
 
 func TestSave_AnyInput(t *testing.T) {
-	mockStorage := newMockStorage()
-	svc := NewService(mockStorage)
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockRepo := mock.NewMockStorage(ctrl)
+	svc := NewService(mockRepo)
+
+	mockRepo.EXPECT().
+		Save(gomock.Any(), "invalid-url").
+		Return(nil)
 
 	id, err := svc.Save("invalid-url")
 	if err != nil {
@@ -60,20 +76,18 @@ func TestSave_AnyInput(t *testing.T) {
 	if id == "" {
 		t.Errorf("ожидался непустой ID")
 	}
-
-	url, found := mockStorage.Get(id)
-	if !found {
-		t.Errorf("ожидалось, что URL будет сохранен")
-	}
-	if url != "invalid-url" {
-		t.Errorf("ожидался сохраненный URL 'invalid-url', получен '%s'", url)
-	}
 }
 
 func TestGet_Found(t *testing.T) {
-	mockStorage := newMockStorage()
-	mockStorage.Save("abc123", "https://example.com")
-	svc := NewService(mockStorage)
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockRepo := mock.NewMockStorage(ctrl)
+	svc := NewService(mockRepo)
+
+	mockRepo.EXPECT().
+		Get("abc123").
+		Return("https://example.com", true)
 
 	url, found := svc.Get("abc123")
 	if !found {
@@ -85,8 +99,15 @@ func TestGet_Found(t *testing.T) {
 }
 
 func TestGet_NotFound(t *testing.T) {
-	mockStorage := newMockStorage()
-	svc := NewService(mockStorage)
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockRepo := mock.NewMockStorage(ctrl)
+	svc := NewService(mockRepo)
+
+	mockRepo.EXPECT().
+		Get("nonexistent").
+		Return("", false)
 
 	_, found := svc.Get("nonexistent")
 	if found {
@@ -95,8 +116,16 @@ func TestGet_NotFound(t *testing.T) {
 }
 
 func TestSave_GeneratesUniqueIDs(t *testing.T) {
-	mockStorage := newMockStorage()
-	svc := NewService(mockStorage)
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockRepo := mock.NewMockStorage(ctrl)
+	svc := NewService(mockRepo)
+
+	mockRepo.EXPECT().
+		Save(gomock.Any(), gomock.Any()).
+		Return(nil).
+		Times(100)
 
 	ids := make(map[string]bool)
 	for i := 0; i < 100; i++ {
@@ -148,30 +177,4 @@ func TestGenerateID_Uniqueness(t *testing.T) {
 		}
 		_ = ids[id]
 	}
-}
-
-type mockStorage struct {
-	data map[string]string
-}
-
-func newMockStorage() *mockStorage {
-	return &mockStorage{data: make(map[string]string)}
-}
-
-func (m *mockStorage) Save(shortID, originalURL string) error {
-	m.data[shortID] = originalURL
-	return nil
-}
-
-func (m *mockStorage) Get(shortID string) (string, bool) {
-	url, ok := m.data[shortID]
-	return url, ok
-}
-
-func (m *mockStorage) SaveIfNotExists(shortID, originalURL string) error {
-	if _, ok := m.data[shortID]; ok {
-		return errors.New("Короткая ссылка уже существует")
-	}
-	m.data[shortID] = originalURL
-	return nil
 }

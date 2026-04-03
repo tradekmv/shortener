@@ -3,6 +3,7 @@ package service
 import (
 	"crypto/rand"
 	"errors"
+	"fmt"
 	"strings"
 
 	"github.com/tradekmv/shortener.git/internal/repository/storage"
@@ -31,13 +32,13 @@ func (s *Service) Save(originalURL string) (string, error) {
 			return "", err
 		}
 
-		err = s.storage.SaveIfNotExists(id, originalURL)
+		err = s.storage.Save(id, originalURL)
 		if err == nil {
 			return id, nil
 		}
 
 		if !errors.Is(err, storage.ErrAlreadyExists) {
-			return "", err
+			return "", fmt.Errorf("ошибка сохранения ссылки: %w", err)
 		}
 	}
 	return "", ErrMaxRetriesExceeded

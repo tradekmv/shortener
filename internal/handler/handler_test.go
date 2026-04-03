@@ -16,7 +16,7 @@ func TestPostHandler_Success(t *testing.T) {
 	defer ctrl.Finish()
 
 	mockStorage := mock.NewMockStorage(ctrl)
-	mockStorage.EXPECT().SaveIfNotExists(gomock.Any(), "https://example.com").Return(nil)
+	mockStorage.EXPECT().Save(gomock.Any(), "https://example.com").Return(nil)
 
 	svc := service.NewService(mockStorage)
 	h := New(svc, "http://localhost:8080")
