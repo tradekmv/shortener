@@ -44,7 +44,8 @@ func (h *ShortenerHandler) PostHandler(w http.ResponseWriter, r *http.Request) {
 
 	shortID, err := h.service.Save(originalURL)
 	if err != nil {
-		http.Error(w, "Не удалось сохранить URL", http.StatusInternalServerError)
+		log.Printf("Ошибка сохранения URL: %v", err)
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
 

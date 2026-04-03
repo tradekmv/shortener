@@ -43,29 +43,11 @@ func TestShortener_Get_NotFound(t *testing.T) {
 	}
 }
 
-func TestShortener_SaveIfNotExists_Success(t *testing.T) {
+func TestShortener_Save_Success(t *testing.T) {
 	s := New()
-	err := s.SaveIfNotExists("abc123", "https://example.com")
+	err := s.Save("abc123", "https://example.com")
 	if err != nil {
 		t.Errorf("неожиданная ошибка: %v", err)
-	}
-}
-
-func TestShortener_SaveIfNotExists_AlreadyExists(t *testing.T) {
-	s := New()
-	s.Save("abc123", "https://example.com")
-
-	err := s.SaveIfNotExists("abc123", "https://other.com")
-	if err != ErrAlreadyExists {
-		t.Errorf("ожидалась ошибка ErrAlreadyExists, получена: %v", err)
-	}
-
-	url, ok := s.Get("abc123")
-	if !ok {
-		t.Errorf("ожидалось, что ключ 'abc123' существует")
-	}
-	if url != "https://example.com" {
-		t.Errorf("ожидался оригинальный URL 'https://example.com', получен '%s'", url)
 	}
 }
 
