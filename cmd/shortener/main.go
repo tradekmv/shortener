@@ -6,9 +6,9 @@ import (
 	"os"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/go-chi/chi/v5/middleware"
 	"github.com/tradekmv/shortener.git/internal/config"
 	"github.com/tradekmv/shortener.git/internal/handler"
+	"github.com/tradekmv/shortener.git/internal/middleware"
 	"github.com/tradekmv/shortener.git/internal/repository/storage"
 	"github.com/tradekmv/shortener.git/internal/service"
 )
@@ -22,7 +22,7 @@ func main() {
 
 	r := chi.NewRouter()
 
-	r.Use(middleware.Logger)
+	r.Use(middleware.LoggingMiddleware)
 
 	store := storage.New()
 	svc := service.NewService(store)
