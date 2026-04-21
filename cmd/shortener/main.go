@@ -29,6 +29,7 @@ func main() {
 	h := handler.New(svc, cfg.BaseURL)
 
 	r.Post("/", h.PostHandler)
+	r.Post("/api/shorten", h.APIShortenHandler)
 	r.Get("/{id}", h.GetHandler)
 
 	addr := cfg.ServerAddress
