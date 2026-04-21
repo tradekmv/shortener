@@ -6,7 +6,7 @@ import (
 )
 
 func TestShortener_Save(t *testing.T) {
-	s := New()
+	s := New("")
 	err := s.Save("abc123", "https://example.com")
 	if err != nil {
 		t.Errorf("неожиданная ошибка: %v", err)
@@ -22,7 +22,7 @@ func TestShortener_Save(t *testing.T) {
 }
 
 func TestShortener_Get_Found(t *testing.T) {
-	s := New()
+	s := New("")
 	s.Save("abc123", "https://example.com")
 
 	url, ok := s.Get("abc123")
@@ -35,7 +35,7 @@ func TestShortener_Get_Found(t *testing.T) {
 }
 
 func TestShortener_Get_NotFound(t *testing.T) {
-	s := New()
+	s := New("")
 
 	_, ok := s.Get("nonexistent")
 	if ok {
@@ -44,7 +44,7 @@ func TestShortener_Get_NotFound(t *testing.T) {
 }
 
 func TestShortener_Save_Success(t *testing.T) {
-	s := New()
+	s := New("")
 	err := s.Save("abc123", "https://example.com")
 	if err != nil {
 		t.Errorf("неожиданная ошибка: %v", err)
@@ -52,7 +52,7 @@ func TestShortener_Save_Success(t *testing.T) {
 }
 
 func TestShortener_Concurrent(t *testing.T) {
-	s := New()
+	s := New("")
 	var wg sync.WaitGroup
 
 	for i := 0; i < 100; i++ {
