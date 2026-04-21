@@ -104,3 +104,75 @@ func TestGetHandler_NotFound(t *testing.T) {
 		t.Errorf("ожидался статус %d, получен %d", http.StatusNotFound, w.Code)
 	}
 }
+
+func TestAPIShortenHandler_Success(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockStorage := mock.NewMockStorage(ctrl)
+	mockStorage.EXPECT().Save(gomock.Any(), "https://example.com").Return(nil)
+
+	svc := service.NewService(mockStorage)
+	h := New(svc, "http://localhost:8080")
+
+	body := `{"url":"https://example.com"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/shorten", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	h.APIShortenHandler(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Errorf("ожидался статус %d, получен %d", http.StatusCreated, w.Code)
+	}
+
+	contentType := w.Header().Get("Content-Type")
+	if contentType != "application/json" {
+		t.Errorf("ожидался Content-Type 'application/json', получен '%s'", contentType)
+	}
+
+	respBody := w.Body.String()
+	if !strings.Contains(respBody, `"result":"`) {
+		t.Errorf("ожидался ответ с полем 'result', получен '%s'", respBody)
+	}
+}
+
+func TestAPIShortenHandler_InvalidJSON(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockStorage := mock.NewMockStorage(ctrl)
+	svc := service.NewService(mockStorage)
+	h := New(svc, "http://localhost:8080")
+
+	body := `{invalid json}`
+	req := httptest.NewRequest(http.MethodPost, "/api/shorten", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	h.APIShortenHandler(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("ожидался статус %d, получен %d", http.StatusBadRequest, w.Code)
+	}
+}
+
+func TestAPIShortenHandler_EmptyURL(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockStorage := mock.NewMockStorage(ctrl)
+	svc := service.NewService(mockStorage)
+	h := New(svc, "http://localhost:8080")
+
+	body := `{"url":""}`
+	req := httptest.NewRequest(http.MethodPost, "/api/shorten", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	h.APIShortenHandler(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("ожидался статус %d, получен %d", http.StatusBadRequest, w.Code)
+	}
+}

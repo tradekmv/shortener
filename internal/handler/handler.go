@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"encoding/json"
 	"io"
 	"log"
 	"net/http"
@@ -9,6 +10,14 @@ import (
 
 	"github.com/tradekmv/shortener.git/internal/service"
 )
+
+type ShortenerRequest struct {
+	URL string `json:"url"`
+}
+
+type ShortenerResponse struct {
+	Result string `json:"result"`
+}
 
 // ShortenerHandler обрабатывает HTTP-запросы для сокращения URL
 type ShortenerHandler struct {
@@ -79,4 +88,42 @@ func (h *ShortenerHandler) GetHandler(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Location", originalURL)
 	w.WriteHeader(http.StatusTemporaryRedirect)
+}
+
+// APIShortenHandler обрабатывает POST запросы JSON API для создания короткой ссылки
+func (h *ShortenerHandler) APIShortenHandler(w http.ResponseWriter, r *http.Request) {
+	var req ShortenerRequest
+
+	dec := json.NewDecoder(r.Body)
+	if err := dec.Decode(&req); err != nil {
+		http.Error(w, "Неверный формат JSON", http.StatusBadRequest)
+		return
+	}
+
+	if req.URL == "" {
+		http.Error(w, "URL не может быть пустым", http.StatusBadRequest)
+		return
+	}
+
+	shortID, err := h.service.Save(req.URL)
+	if err != nil {
+		log.Printf("Ошибка сохранения URL: %v", err)
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+
+	shortURL, err := url.JoinPath(h.baseURL, shortID)
+	if err != nil {
+		http.Error(w, "Не удалось построить короткий URL", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+
+	resp := ShortenerResponse{Result: shortURL}
+	enc := json.NewEncoder(w)
+	if err := enc.Encode(resp); err != nil {
+		return
+	}
 }
