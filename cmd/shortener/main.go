@@ -23,6 +23,7 @@ func main() {
 	r := chi.NewRouter()
 
 	r.Use(middleware.LoggingMiddleware)
+	r.Use(middleware.GzipMiddleware)
 
 	store := storage.New()
 	svc := service.NewService(store)
