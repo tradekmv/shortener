@@ -25,7 +25,7 @@ func main() {
 	r.Use(middleware.LoggingMiddleware)
 	r.Use(middleware.GzipMiddleware)
 
-	store := storage.New()
+	store := storage.New(cfg.FileStoragePath)
 	svc := service.NewService(store)
 	h := handler.New(svc, cfg.BaseURL)
 
