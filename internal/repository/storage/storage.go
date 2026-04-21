@@ -1,11 +1,19 @@
 package storage
 
 import (
+	"encoding/json"
 	"errors"
+	"os"
 	"sync"
 )
 
 var ErrAlreadyExists = errors.New("короткая ссылка уже существует")
+
+type URLRecord struct {
+	UUID        string `json:"uuid"`
+	ShortURL    string `json:"short_url"`
+	OriginalURL string `json:"original_url"`
+}
 
 type Storage interface {
 	Save(shortID, originalURL string) error
@@ -13,14 +21,51 @@ type Storage interface {
 }
 
 type Shortener struct {
-	mu      sync.RWMutex
-	storage map[string]string
+	mu       sync.RWMutex
+	storage  map[string]string
+	filePath string
 }
 
-func New() *Shortener {
-	return &Shortener{
-		storage: make(map[string]string),
+func New(filePath string) *Shortener {
+	s := &Shortener{
+		storage:  make(map[string]string),
+		filePath: filePath,
 	}
+	s.loadFromFile()
+	return s
+}
+
+func (s *Shortener) loadFromFile() {
+	data, err := os.ReadFile(s.filePath)
+	if err != nil {
+		return
+	}
+
+	var records []URLRecord
+	if err := json.Unmarshal(data, &records); err != nil {
+		return
+	}
+
+	for _, rec := range records {
+		s.storage[rec.ShortURL] = rec.OriginalURL
+	}
+}
+
+func (s *Shortener) saveToFile() {
+	var records []URLRecord
+	for shortURL, originalURL := range s.storage {
+		records = append(records, URLRecord{
+			ShortURL:    shortURL,
+			OriginalURL: originalURL,
+		})
+	}
+
+	data, err := json.Marshal(records)
+	if err != nil {
+		return
+	}
+
+	os.WriteFile(s.filePath, data, 0644)
 }
 
 func (s *Shortener) Save(shortID, originalURL string) error {
@@ -32,6 +77,7 @@ func (s *Shortener) Save(shortID, originalURL string) error {
 	}
 
 	s.storage[shortID] = originalURL
+	s.saveToFile()
 	return nil
 }
 
