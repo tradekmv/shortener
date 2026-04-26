@@ -25,7 +25,11 @@ func main() {
 	r.Use(middleware.LoggingMiddleware)
 	r.Use(middleware.GzipMiddleware)
 
-	store := storage.New(cfg.FileStoragePath)
+	store, err := storage.New(cfg.FileStoragePath)
+	if err != nil {
+		log.Printf("Ошибка инициализации хранилища: %v", err)
+		os.Exit(1)
+	}
 	svc := service.NewService(store)
 	h := handler.New(svc, cfg.BaseURL)
 
