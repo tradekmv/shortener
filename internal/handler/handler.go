@@ -51,7 +51,7 @@ func (h *ShortenerHandler) PostHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	shortID, err := h.service.Save(originalURL)
+	shortID, err := h.service.Save(r.Context(), originalURL)
 	if err != nil {
 		log.Printf("Ошибка сохранения URL: %v", err)
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
@@ -105,7 +105,7 @@ func (h *ShortenerHandler) APIShortenHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	shortID, err := h.service.Save(req.URL)
+	shortID, err := h.service.Save(r.Context(), req.URL)
 	if err != nil {
 		log.Printf("Ошибка сохранения URL: %v", err)
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)

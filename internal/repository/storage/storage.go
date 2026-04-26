@@ -3,8 +3,11 @@ package storage
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"sync"
+
+	"github.com/rs/zerolog/log"
 )
 
 var ErrAlreadyExists = errors.New("короткая ссылка уже существует")
@@ -26,32 +29,43 @@ type Shortener struct {
 	filePath string
 }
 
-func New(filePath string) *Shortener {
+func New(filePath string) (*Shortener, error) {
 	s := &Shortener{
 		storage:  make(map[string]string),
 		filePath: filePath,
 	}
-	s.loadFromFile()
-	return s
+	if err := s.loadFromFile(); err != nil {
+		log.Error().Err(err).Msg("Не удалось загрузить данные из файла")
+	}
+	return s, nil
 }
 
-func (s *Shortener) loadFromFile() {
+func (s *Shortener) loadFromFile() error {
+	if s.filePath == "" {
+		return nil
+	}
 	data, err := os.ReadFile(s.filePath)
 	if err != nil {
-		return
+		log.Error().Err(err).Msg("Ошибка чтения файла")
+		return err
 	}
 
 	var records []URLRecord
 	if err := json.Unmarshal(data, &records); err != nil {
-		return
+		log.Error().Err(err).Msg("Ошибка парсинга JSON")
+		return err
 	}
 
 	for _, rec := range records {
 		s.storage[rec.ShortURL] = rec.OriginalURL
 	}
+	return nil
 }
 
-func (s *Shortener) saveToFile() {
+func (s *Shortener) saveToFile() error {
+	if s.filePath == "" {
+		return nil
+	}
 	var records []URLRecord
 	for shortURL, originalURL := range s.storage {
 		records = append(records, URLRecord{
@@ -62,10 +76,14 @@ func (s *Shortener) saveToFile() {
 
 	data, err := json.Marshal(records)
 	if err != nil {
-		return
+		return err
 	}
 
-	os.WriteFile(s.filePath, data, 0644)
+	if err := os.WriteFile(s.filePath, data, 0644); err != nil {
+		log.Error().Err(err).Msg("Ошибка записи в файл")
+		return err
+	}
+	return nil
 }
 
 func (s *Shortener) Save(shortID, originalURL string) error {
@@ -77,7 +95,9 @@ func (s *Shortener) Save(shortID, originalURL string) error {
 	}
 
 	s.storage[shortID] = originalURL
-	s.saveToFile()
+	if err := s.saveToFile(); err != nil {
+		return fmt.Errorf("ошибка сохранения в файл: %w", err)
+	}
 	return nil
 }
 
