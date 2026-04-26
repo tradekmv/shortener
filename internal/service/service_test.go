@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"testing"
 
 	"github.com/tradekmv/shortener.git/internal/repository/mock"
@@ -46,7 +47,7 @@ func TestSave_Success(t *testing.T) {
 		Save(gomock.Any(), "https://example.com").
 		Return(nil)
 
-	id, err := svc.Save("https://example.com")
+	id, err := svc.Save(context.Background(), "https://example.com")
 	if err != nil {
 		t.Errorf("неожиданная ошибка: %v", err)
 	}
@@ -69,7 +70,7 @@ func TestSave_AnyInput(t *testing.T) {
 		Save(gomock.Any(), "invalid-url").
 		Return(nil)
 
-	id, err := svc.Save("invalid-url")
+	id, err := svc.Save(context.Background(), "invalid-url")
 	if err != nil {
 		t.Errorf("неожиданная ошибка: %v", err)
 	}
@@ -129,7 +130,7 @@ func TestSave_GeneratesUniqueIDs(t *testing.T) {
 
 	ids := make(map[string]bool)
 	for i := 0; i < 100; i++ {
-		id, err := svc.Save("https://example.com/page" + string(rune('0'+i)))
+		id, err := svc.Save(context.Background(), "https://example.com/page"+string(rune('0'+i)))
 		if err != nil {
 			t.Fatalf("неожиданная ошибка на итерации %d: %v", i, err)
 		}

@@ -1,11 +1,22 @@
 package storage
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
+	"os"
 	"sync"
+
+	"github.com/rs/zerolog/log"
 )
 
 var ErrAlreadyExists = errors.New("короткая ссылка уже существует")
+
+type URLRecord struct {
+	UUID        string `json:"uuid"`
+	ShortURL    string `json:"short_url"`
+	OriginalURL string `json:"original_url"`
+}
 
 type Storage interface {
 	Save(shortID, originalURL string) error
@@ -13,14 +24,66 @@ type Storage interface {
 }
 
 type Shortener struct {
-	mu      sync.RWMutex
-	storage map[string]string
+	mu       sync.RWMutex
+	storage  map[string]string
+	filePath string
 }
 
-func New() *Shortener {
-	return &Shortener{
-		storage: make(map[string]string),
+func New(filePath string) (*Shortener, error) {
+	s := &Shortener{
+		storage:  make(map[string]string),
+		filePath: filePath,
 	}
+	if err := s.loadFromFile(); err != nil {
+		log.Error().Err(err).Msg("Не удалось загрузить данные из файла")
+	}
+	return s, nil
+}
+
+func (s *Shortener) loadFromFile() error {
+	if s.filePath == "" {
+		return nil
+	}
+	data, err := os.ReadFile(s.filePath)
+	if err != nil {
+		log.Error().Err(err).Msg("Ошибка чтения файла")
+		return err
+	}
+
+	var records []URLRecord
+	if err := json.Unmarshal(data, &records); err != nil {
+		log.Error().Err(err).Msg("Ошибка парсинга JSON")
+		return err
+	}
+
+	for _, rec := range records {
+		s.storage[rec.ShortURL] = rec.OriginalURL
+	}
+	return nil
+}
+
+func (s *Shortener) saveToFile() error {
+	if s.filePath == "" {
+		return nil
+	}
+	var records []URLRecord
+	for shortURL, originalURL := range s.storage {
+		records = append(records, URLRecord{
+			ShortURL:    shortURL,
+			OriginalURL: originalURL,
+		})
+	}
+
+	data, err := json.Marshal(records)
+	if err != nil {
+		return err
+	}
+
+	if err := os.WriteFile(s.filePath, data, 0644); err != nil {
+		log.Error().Err(err).Msg("Ошибка записи в файл")
+		return err
+	}
+	return nil
 }
 
 func (s *Shortener) Save(shortID, originalURL string) error {
@@ -32,6 +95,9 @@ func (s *Shortener) Save(shortID, originalURL string) error {
 	}
 
 	s.storage[shortID] = originalURL
+	if err := s.saveToFile(); err != nil {
+		return fmt.Errorf("ошибка сохранения в файл: %w", err)
+	}
 	return nil
 }
 

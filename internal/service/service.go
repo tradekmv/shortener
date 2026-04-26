@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"crypto/rand"
 	"errors"
 	"fmt"
@@ -25,7 +26,7 @@ func NewService(storage storage.Storage) *Service {
 	return &Service{storage: storage}
 }
 
-func (s *Service) Save(originalURL string) (string, error) {
+func (s *Service) Save(ctx context.Context, originalURL string) (string, error) {
 	for i := 0; i < maxAttempts; i++ {
 		id, err := generateID(length)
 		if err != nil {
