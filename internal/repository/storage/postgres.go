@@ -5,9 +5,12 @@ import (
 	"errors"
 	"fmt"
 
-	_ "github.com/lib/pq"
+	"github.com/lib/pq"
 	"github.com/rs/zerolog/log"
 )
+
+// ErrURLAlreadyExists - ошибка, возвращаемая при попытке сохранить уже существующий URL
+var ErrURLAlreadyExists = errors.New("URL уже существует")
 
 // PostgresStorage хранит данные в PostgreSQL
 type PostgresStorage struct {
@@ -47,6 +50,7 @@ func (s *PostgresStorage) migrate() error {
 		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 	);
 	CREATE INDEX IF NOT EXISTS idx_short_url ON urls(short_url);
+	CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_original_url ON urls(original_url);
 	`
 	_, err := s.db.Exec(query)
 	if err != nil {
@@ -57,18 +61,21 @@ func (s *PostgresStorage) migrate() error {
 }
 
 // Save сохраняет пару shortURL → originalURL
+// Возвращает ErrURLAlreadyExists если original_url уже существует в базе
 func (s *PostgresStorage) Save(shortID, originalURL string) error {
-	query := `INSERT INTO urls (short_url, original_url) VALUES ($1, $2) ON CONFLICT (short_url) DO NOTHING`
-	result, err := s.db.Exec(query, shortID, originalURL)
+	query := `INSERT INTO urls (short_url, original_url) VALUES ($1, $2)`
+	_, err := s.db.Exec(query, shortID, originalURL)
 	if err != nil {
+		// Проверяем, является ли ошибка нарушением уникального индекса (pq.Error используется с github.com/lib/pq)
+		var pqErr *pq.Error
+		if errors.As(err, &pqErr) {
+			if pqErr.Code == "23505" { // unique_violation
+				return ErrURLAlreadyExists
+			}
+			log.Warn().Err(err).Str("code", string(pqErr.Code)).Msg("PostgreSQL error")
+		}
 		return fmt.Errorf("ошибка сохранения в БД: %w", err)
 	}
-
-	rowsAffected, _ := result.RowsAffected()
-	if rowsAffected == 0 {
-		return ErrAlreadyExists
-	}
-
 	return nil
 }
 
@@ -84,6 +91,20 @@ func (s *PostgresStorage) Get(shortID string) (string, bool) {
 		return "", false
 	}
 	return originalURL, true
+}
+
+// GetByOriginalURL возвращает shortURL по originalURL
+func (s *PostgresStorage) GetByOriginalURL(originalURL string) (string, bool) {
+	var shortURL string
+	err := s.db.QueryRow("SELECT short_url FROM urls WHERE original_url = $1", originalURL).Scan(&shortURL)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return "", false
+		}
+		log.Error().Err(err).Msg("Ошибка чтения из БД")
+		return "", false
+	}
+	return shortURL, true
 }
 
 // SaveBatch saves multiple URLs in one transaction for PostgreSQL
