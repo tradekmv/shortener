@@ -86,6 +86,36 @@ func (s *PostgresStorage) Get(shortID string) (string, bool) {
 	return originalURL, true
 }
 
+// SaveBatch saves multiple URLs in one transaction for PostgreSQL
+func (s *PostgresStorage) SaveBatch(urls []URLRecord) ([]URLRecord, error) {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return nil, fmt.Errorf("ошибка начала транзакции: %w", err)
+	}
+	defer tx.Rollback()
+
+	result := make([]URLRecord, 0, len(urls))
+	for _, rec := range urls {
+		_, err := tx.Exec(
+			`INSERT INTO urls (short_url, original_url) VALUES ($1, $2) ON CONFLICT (short_url) DO UPDATE SET short_url = EXCLUDED.short_url RETURNING id`,
+			rec.ShortURL,
+			rec.OriginalURL,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("ошибка вставки в БД: %w", err)
+		}
+		result = append(result, URLRecord{
+			ShortURL:    rec.ShortURL,
+			OriginalURL: rec.OriginalURL,
+		})
+	}
+
+	if err := tx.Commit(); err != nil {
+		return nil, fmt.Errorf("ошибка коммита транзакции: %w", err)
+	}
+	return result, nil
+}
+
 // Close закрывает соединение с БД
 func (s *PostgresStorage) Close() error {
 	return s.db.Close()

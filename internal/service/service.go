@@ -49,6 +49,25 @@ func (s *Service) Get(shortID string) (string, bool) {
 	return s.storage.Get(shortID)
 }
 
+// SaveBatch saves multiple URLs in one operation
+func (s *Service) SaveBatch(ctx context.Context, urls []storage.URLRecord) ([]storage.URLRecord, error) {
+	// Generate short IDs for all URLs first (to maintain correlation with correlation_id)
+	records := make([]storage.URLRecord, 0, len(urls))
+	for _, rec := range urls {
+		shortID, err := generateID(length)
+		if err != nil {
+			return nil, err
+		}
+		records = append(records, storage.URLRecord{
+			ShortURL:    shortID,
+			OriginalURL: rec.OriginalURL,
+		})
+	}
+
+	// Save all URLs in batch
+	return s.storage.SaveBatch(records)
+}
+
 func generateID(n int) (string, error) {
 	b := make([]byte, n)
 	_, err := rand.Read(b)
