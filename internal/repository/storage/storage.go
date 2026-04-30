@@ -1,3 +1,5 @@
+//go:generate mockgen -source=storage.go -destination=mock/mock.go
+
 package storage
 
 import (
@@ -18,9 +20,17 @@ type URLRecord struct {
 	OriginalURL string `json:"original_url"`
 }
 
+// Storage интерфейс хранилища
 type Storage interface {
 	Save(shortID, originalURL string) error
 	Get(shortID string) (string, bool)
+	Close() error
+	Ping() error
+}
+
+// Pinger интерфейс для проверки соединения
+type Pinger interface {
+	Ping() error
 }
 
 type Shortener struct {
@@ -106,4 +116,14 @@ func (s *Shortener) Get(shortID string) (string, bool) {
 	defer s.mu.RUnlock()
 	originalURL, ok := s.storage[shortID]
 	return originalURL, ok
+}
+
+// Close закрывает хранилище (пустая реализация для файлового хранилища)
+func (s *Shortener) Close() error {
+	return nil
+}
+
+// Ping проверяет доступность хранилища
+func (s *Shortener) Ping() error {
+	return nil
 }
