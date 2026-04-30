@@ -7,11 +7,14 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tradekmv/shortener.git/internal/db"
 	"github.com/tradekmv/shortener.git/internal/repository/mock"
+	"github.com/tradekmv/shortener.git/internal/repository/storage"
 	"github.com/tradekmv/shortener.git/internal/service"
 	"go.uber.org/mock/gomock"
 )
+
+// Compile-time проверка
+var _ storage.Storage = (*mock.MockStorage)(nil)
 
 func TestPostHandler_Success(t *testing.T) {
 	ctrl := gomock.NewController(t)
@@ -189,24 +192,19 @@ func TestPingHandler_NoDatabase(t *testing.T) {
 	h.PingHandler(w, req)
 
 	if w.Code != http.StatusInternalServerError {
-		t.Errorf("ожидался статус %d при отсутствии БД, получен %d", http.StatusInternalServerError, w.Code)
+		t.Errorf("ожидался статус %d при отсутствии хранилища, получен %d", http.StatusInternalServerError, w.Code)
 	}
 }
 
-func TestPingHandler_WithMockDatabase(t *testing.T) {
+func TestPingHandler_WithMockStorage(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
 	mockStorage := mock.NewMockStorage(ctrl)
+	mockStorage.EXPECT().Ping().Return(nil)
+
 	svc := service.NewService(mockStorage)
-
-	mockDB := &db.MockDatabase{
-		PingFunc: func() error {
-			return nil
-		},
-	}
-
-	h := New(svc, "http://localhost:8080", mockDB)
+	h := New(svc, "http://localhost:8080", mockStorage)
 
 	req := httptest.NewRequest(http.MethodGet, "/ping", nil)
 	w := httptest.NewRecorder()
@@ -218,20 +216,15 @@ func TestPingHandler_WithMockDatabase(t *testing.T) {
 	}
 }
 
-func TestPingHandler_DatabaseError(t *testing.T) {
+func TestPingHandler_StorageError(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
 	mockStorage := mock.NewMockStorage(ctrl)
+	mockStorage.EXPECT().Ping().Return(errors.New("connection refused"))
+
 	svc := service.NewService(mockStorage)
-
-	mockDB := &db.MockDatabase{
-		PingFunc: func() error {
-			return errors.New("connection refused")
-		},
-	}
-
-	h := New(svc, "http://localhost:8080", mockDB)
+	h := New(svc, "http://localhost:8080", mockStorage)
 
 	req := httptest.NewRequest(http.MethodGet, "/ping", nil)
 	w := httptest.NewRecorder()
@@ -239,6 +232,6 @@ func TestPingHandler_DatabaseError(t *testing.T) {
 	h.PingHandler(w, req)
 
 	if w.Code != http.StatusInternalServerError {
-		t.Errorf("ожидался статус %d при ошибке БД, получен %d", http.StatusInternalServerError, w.Code)
+		t.Errorf("ожидался статус %d при ошибке хранилища, получен %d", http.StatusInternalServerError, w.Code)
 	}
 }

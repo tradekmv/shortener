@@ -7,8 +7,8 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/tradekmv/shortener.git/internal/db"
 	"github.com/tradekmv/shortener.git/internal/middleware"
+	"github.com/tradekmv/shortener.git/internal/repository/storage"
 	"github.com/tradekmv/shortener.git/internal/service"
 )
 
@@ -24,10 +24,10 @@ type ShortenerResponse struct {
 type ShortenerHandler struct {
 	service *service.Service
 	baseURL string
-	db      db.Pinger
+	db      storage.Pinger
 }
 
-func New(service *service.Service, baseURL string, db db.Pinger) *ShortenerHandler {
+func New(service *service.Service, baseURL string, db storage.Pinger) *ShortenerHandler {
 	return &ShortenerHandler{
 		service: service,
 		baseURL: baseURL,
@@ -35,7 +35,7 @@ func New(service *service.Service, baseURL string, db db.Pinger) *ShortenerHandl
 	}
 }
 
-// PingHandler проверяет соединение с базой данных
+// PingHandler проверяет соединение с хранилищем
 func (h *ShortenerHandler) PingHandler(w http.ResponseWriter, r *http.Request) {
 	if h.db == nil {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -43,7 +43,7 @@ func (h *ShortenerHandler) PingHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.db.Ping(); err != nil {
-		middleware.Log.Printf("Ошибка проверки соединения с БД: %v", err)
+		middleware.Log.Printf("Ошибка проверки соединения: %v", err)
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}

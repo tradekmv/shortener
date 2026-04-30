@@ -28,32 +28,54 @@ func main() {
 	r.Use(middleware.LoggingMiddleware)
 	r.Use(middleware.GzipMiddleware)
 
-	store, err := storage.New(cfg.FileStoragePath)
-	if err != nil {
-		middleware.Log.Printf("Ошибка инициализации хранилища: %v", err)
-		os.Exit(1)
+	// Выбираем хранилище в зависимости от конфигурации
+	var store storage.Storage
+	var dbPinger db.Pinger
+
+	// 1. Пытаемся использовать PostgreSQL
+	if cfg.DatabaseDSN != "" {
+		postgresStore, err := storage.NewPostgres(cfg.DatabaseDSN)
+		if err != nil {
+			middleware.Log.Printf("Ошибка подключения к PostgreSQL: %v", err)
+			// Fallback к файловому хранилищу
+			if cfg.FileStoragePath != "" {
+				middleware.Log.Println("Используем файловый fallback")
+				store, err = storage.New(cfg.FileStoragePath)
+				if err != nil {
+					middleware.Log.Printf("Ошибка инициализации файлового хранилища: %v", err)
+					os.Exit(1)
+				}
+			} else {
+				// Fallback к памяти
+				middleware.Log.Println("Используем хранилище в памяти")
+				store = storage.NewMemory()
+			}
+		} else {
+			store = postgresStore
+			dbPinger = postgresStore
+			middleware.Log.Println("Используем PostgreSQL хранилище")
+		}
+	} else {
+		// 2. Пытаемся использовать файловое хранилище
+		if cfg.FileStoragePath != "" {
+			store, err = storage.New(cfg.FileStoragePath)
+			if err != nil {
+				middleware.Log.Printf("Ошибка инициализации файлового хранилища: %v", err)
+				// Fallback к памяти
+				middleware.Log.Println("Используем хранилище в памяти")
+				store = storage.NewMemory()
+			} else {
+				middleware.Log.Println("Используем файловый storage")
+			}
+		} else {
+			// 3. Используем память
+			store = storage.NewMemory()
+			middleware.Log.Println("Используем хранилище в памяти")
+		}
 	}
 
 	svc := service.NewService(store)
-
-	// Инициализация подключения к БД
-	var database *db.Database
-	if cfg.DatabaseDSN != "" {
-		database, err = db.New(cfg.DatabaseDSN)
-		if err != nil {
-			middleware.Log.Printf("Ошибка подключения к БД: %v", err)
-			os.Exit(1)
-		}
-		defer database.Close()
-
-		// Инициализация схемы БД
-		if err := database.InitSchema(); err != nil {
-			middleware.Log.Printf("Ошибка инициализации схемы БД: %v", err)
-			os.Exit(1)
-		}
-	}
-
-	h := handler.New(svc, cfg.BaseURL, database)
+	h := handler.New(svc, cfg.BaseURL, dbPinger)
 
 	r.Get("/ping", h.PingHandler)
 	r.Post("/", h.PostHandler)
@@ -83,8 +105,19 @@ func main() {
 	<-quit
 
 	middleware.Log.Println("Завершение работы сервера...")
+
+	// Закрываем хранилище
+	if store != nil {
+		if err := store.Close(); err != nil {
+			middleware.Log.Printf("Ошибка закрытия хранилища: %v", err)
+		}
+	}
+
 	if err := srv.Shutdown(context.TODO()); err != nil {
 		middleware.Log.Printf("Ошибка при завершении: %v", err)
 	}
 	middleware.Log.Println("Сервер остановлен")
 }
+
+// Compile-time проверка, что db.Database реализует db.Pinger
+var _ db.Pinger = (*db.Database)(nil)
