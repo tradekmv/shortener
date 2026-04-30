@@ -6,12 +6,13 @@
 //	mockgen -source=internal/repository/storage/storage.go -destination=internal/repository/mock/mock.go
 //
 
-// Package mock is a generated GoMock package.
-package mock
+// Package mock_storage is a generated GoMock package.
+package mock_storage
 
 import (
 	reflect "reflect"
 
+	storage "github.com/tradekmv/shortener.git/internal/repository/storage"
 	gomock "go.uber.org/mock/gomock"
 )
 
@@ -94,6 +95,21 @@ func (m *MockStorage) Save(shortID, originalURL string) error {
 func (mr *MockStorageMockRecorder) Save(shortID, originalURL any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Save", reflect.TypeOf((*MockStorage)(nil).Save), shortID, originalURL)
+}
+
+// SaveBatch mocks base method.
+func (m *MockStorage) SaveBatch(urls []storage.URLRecord) ([]storage.URLRecord, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SaveBatch", urls)
+	ret0, _ := ret[0].([]storage.URLRecord)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// SaveBatch indicates an expected call of SaveBatch.
+func (mr *MockStorageMockRecorder) SaveBatch(urls any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SaveBatch", reflect.TypeOf((*MockStorage)(nil).SaveBatch), urls)
 }
 
 // MockPinger is a mock of Pinger interface.

@@ -7,20 +7,19 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/tradekmv/shortener.git/internal/repository/mock"
+	mock_storage "github.com/tradekmv/shortener.git/internal/repository/mock"
 	"github.com/tradekmv/shortener.git/internal/repository/storage"
 	"github.com/tradekmv/shortener.git/internal/service"
 	"go.uber.org/mock/gomock"
 )
 
-// Compile-time проверка
-var _ storage.Storage = (*mock.MockStorage)(nil)
+var _ storage.Storage = (*mock_storage.MockStorage)(nil)
 
 func TestPostHandler_Success(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockStorage := mock.NewMockStorage(ctrl)
+	mockStorage := mock_storage.NewMockStorage(ctrl)
 	mockStorage.EXPECT().Save(gomock.Any(), "https://example.com").Return(nil)
 
 	svc := service.NewService(mockStorage)
@@ -45,7 +44,7 @@ func TestPostHandler_EmptyBody(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockStorage := mock.NewMockStorage(ctrl)
+	mockStorage := mock_storage.NewMockStorage(ctrl)
 	svc := service.NewService(mockStorage)
 	h := New(svc, "http://localhost:8080", nil)
 
@@ -63,7 +62,7 @@ func TestGetHandler_Success(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockStorage := mock.NewMockStorage(ctrl)
+	mockStorage := mock_storage.NewMockStorage(ctrl)
 	mockStorage.EXPECT().Get("abc123").Return("https://example.com", true)
 
 	svc := service.NewService(mockStorage)
@@ -91,7 +90,7 @@ func TestGetHandler_NotFound(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockStorage := mock.NewMockStorage(ctrl)
+	mockStorage := mock_storage.NewMockStorage(ctrl)
 	mockStorage.EXPECT().Get("nonexistent").Return("", false)
 
 	svc := service.NewService(mockStorage)
@@ -114,7 +113,7 @@ func TestAPIShortenHandler_Success(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockStorage := mock.NewMockStorage(ctrl)
+	mockStorage := mock_storage.NewMockStorage(ctrl)
 	mockStorage.EXPECT().Save(gomock.Any(), "https://example.com").Return(nil)
 
 	svc := service.NewService(mockStorage)
@@ -146,7 +145,7 @@ func TestAPIShortenHandler_InvalidJSON(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockStorage := mock.NewMockStorage(ctrl)
+	mockStorage := mock_storage.NewMockStorage(ctrl)
 	svc := service.NewService(mockStorage)
 	h := New(svc, "http://localhost:8080", nil)
 
@@ -166,7 +165,7 @@ func TestAPIShortenHandler_EmptyURL(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockStorage := mock.NewMockStorage(ctrl)
+	mockStorage := mock_storage.NewMockStorage(ctrl)
 	svc := service.NewService(mockStorage)
 	h := New(svc, "http://localhost:8080", nil)
 
@@ -200,7 +199,7 @@ func TestPingHandler_WithMockStorage(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockStorage := mock.NewMockStorage(ctrl)
+	mockStorage := mock_storage.NewMockStorage(ctrl)
 	mockStorage.EXPECT().Ping().Return(nil)
 
 	svc := service.NewService(mockStorage)
@@ -220,7 +219,7 @@ func TestPingHandler_StorageError(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockStorage := mock.NewMockStorage(ctrl)
+	mockStorage := mock_storage.NewMockStorage(ctrl)
 	mockStorage.EXPECT().Ping().Return(errors.New("connection refused"))
 
 	svc := service.NewService(mockStorage)
@@ -233,5 +232,115 @@ func TestPingHandler_StorageError(t *testing.T) {
 
 	if w.Code != http.StatusInternalServerError {
 		t.Errorf("ожидался статус %d при ошибке хранилища, получен %d", http.StatusInternalServerError, w.Code)
+	}
+}
+
+func TestAPIBatchShortenHandler_Success(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockStorage := mock_storage.NewMockStorage(ctrl)
+	svc := service.NewService(mockStorage)
+	h := New(svc, "http://localhost:8080", nil)
+
+	// Mock SaveBatch for batch save operation
+	mockStorage.EXPECT().SaveBatch(gomock.Any()).DoAndReturn(
+		func(urls []storage.URLRecord) ([]storage.URLRecord, error) {
+			result := make([]storage.URLRecord, len(urls))
+			for i, url := range urls {
+				result[i] = storage.URLRecord{
+					ShortURL:    "testID",
+					OriginalURL: url.OriginalURL,
+				}
+			}
+			return result, nil
+		},
+	).Times(1)
+
+	body := `[
+		{"correlation_id": "abc123", "original_url": "https://example.com/1"},
+		{"correlation_id": "def456", "original_url": "https://example.com/2"}
+	]`
+	req := httptest.NewRequest(http.MethodPost, "/api/shorten/batch", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	h.APIBatchShortenHandler(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Errorf("ожидался статус %d, получен %d", http.StatusCreated, w.Code)
+	}
+
+	contentType := w.Header().Get("Content-Type")
+	if contentType != "application/json" {
+		t.Errorf("ожидался Content-Type 'application/json', получен '%s'", contentType)
+	}
+
+	respBody := w.Body.String()
+	if !strings.Contains(respBody, `"short_url":"`) {
+		t.Errorf("ожидался ответ с полем 'short_url', получен '%s'", respBody)
+	}
+	if !strings.Contains(respBody, `"correlation_id":"`) {
+		t.Errorf("ожидался ответ с полем 'correlation_id', получен '%s'", respBody)
+	}
+}
+
+func TestAPIBatchShortenHandler_InvalidJSON(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockStorage := mock_storage.NewMockStorage(ctrl)
+	svc := service.NewService(mockStorage)
+	h := New(svc, "http://localhost:8080", nil)
+
+	body := `{invalid json}`
+	req := httptest.NewRequest(http.MethodPost, "/api/shorten/batch", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	h.APIBatchShortenHandler(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("ожидался статус %d, получен %d", http.StatusBadRequest, w.Code)
+	}
+}
+
+func TestAPIBatchShortenHandler_EmptyBatch(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockStorage := mock_storage.NewMockStorage(ctrl)
+	svc := service.NewService(mockStorage)
+	h := New(svc, "http://localhost:8080", nil)
+
+	body := `[]`
+	req := httptest.NewRequest(http.MethodPost, "/api/shorten/batch", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	h.APIBatchShortenHandler(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("ожидался статус %d, получен %d", http.StatusBadRequest, w.Code)
+	}
+}
+
+func TestAPIBatchShortenHandler_EmptyURL(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockStorage := mock_storage.NewMockStorage(ctrl)
+	svc := service.NewService(mockStorage)
+	h := New(svc, "http://localhost:8080", nil)
+
+	body := `[{"correlation_id": "abc123", "original_url": ""}]`
+	req := httptest.NewRequest(http.MethodPost, "/api/shorten/batch", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	h.APIBatchShortenHandler(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("ожидался статус %d, получен %d", http.StatusBadRequest, w.Code)
 	}
 }
