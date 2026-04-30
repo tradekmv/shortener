@@ -11,7 +11,7 @@ import (
 	"github.com/rs/zerolog"
 )
 
-var log = zerolog.New(os.Stdout).With().Timestamp().Logger().Output(zerolog.ConsoleWriter{Out: os.Stderr})
+var Log = zerolog.New(os.Stdout).With().Timestamp().Logger().Output(zerolog.ConsoleWriter{Out: os.Stderr})
 
 // GzipMiddleware поддерживает сжатие gzip для запросов и ответов
 func GzipMiddleware(next http.Handler) http.Handler {
@@ -79,7 +79,7 @@ func LoggingMiddleware(next http.Handler) http.Handler {
 
 		next.ServeHTTP(wrapped, r)
 
-		log.Info().
+		Log.Info().
 			Str("URI", r.RequestURI).
 			Str("method", r.Method).
 			Dur("duration", time.Since(start)).

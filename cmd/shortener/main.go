@@ -1,7 +1,7 @@
 package main
 
 import (
-	"log"
+	"context"
 	"net/http"
 	"os"
 	"os/signal"
@@ -19,7 +19,7 @@ import (
 func main() {
 	cfg, err := config.Load()
 	if err != nil {
-		log.Printf("Ошибка парсинга флагов: %v", err)
+		middleware.Log.Printf("Ошибка парсинга флагов: %v", err)
 		os.Exit(1)
 	}
 
@@ -30,7 +30,7 @@ func main() {
 
 	store, err := storage.New(cfg.FileStoragePath)
 	if err != nil {
-		log.Printf("Ошибка инициализации хранилища: %v", err)
+		middleware.Log.Printf("Ошибка инициализации хранилища: %v", err)
 		os.Exit(1)
 	}
 
@@ -41,14 +41,14 @@ func main() {
 	if cfg.DatabaseDSN != "" {
 		database, err = db.New(cfg.DatabaseDSN)
 		if err != nil {
-			log.Printf("Ошибка подключения к БД: %v", err)
+			middleware.Log.Printf("Ошибка подключения к БД: %v", err)
 			os.Exit(1)
 		}
 		defer database.Close()
 
 		// Инициализация схемы БД
 		if err := database.InitSchema(); err != nil {
-			log.Printf("Ошибка инициализации схемы БД: %v", err)
+			middleware.Log.Printf("Ошибка инициализации схемы БД: %v", err)
 			os.Exit(1)
 		}
 	}
@@ -70,9 +70,9 @@ func main() {
 
 	// Запуск сервера в горутине
 	go func() {
-		log.Printf("Сервер запущен на %s", addr)
+		middleware.Log.Printf("Сервер запущен на %s", addr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Printf("Ошибка сервера: %v", err)
+			middleware.Log.Printf("Ошибка сервера: %v", err)
 			os.Exit(1)
 		}
 	}()
@@ -82,9 +82,9 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	log.Println("Завершение работы сервера...")
-	if err := srv.Shutdown(nil); err != nil {
-		log.Printf("Ошибка при завершении: %v", err)
+	middleware.Log.Println("Завершение работы сервера...")
+	if err := srv.Shutdown(context.TODO()); err != nil {
+		middleware.Log.Printf("Ошибка при завершении: %v", err)
 	}
-	log.Println("Сервер остановлен")
+	middleware.Log.Println("Сервер остановлен")
 }
