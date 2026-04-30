@@ -1,11 +1,13 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/tradekmv/shortener.git/internal/db"
 	"github.com/tradekmv/shortener.git/internal/repository/mock"
 	"github.com/tradekmv/shortener.git/internal/service"
 	"go.uber.org/mock/gomock"
@@ -19,7 +21,7 @@ func TestPostHandler_Success(t *testing.T) {
 	mockStorage.EXPECT().Save(gomock.Any(), "https://example.com").Return(nil)
 
 	svc := service.NewService(mockStorage)
-	h := New(svc, "http://localhost:8080")
+	h := New(svc, "http://localhost:8080", nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("https://example.com"))
 	w := httptest.NewRecorder()
@@ -42,7 +44,7 @@ func TestPostHandler_EmptyBody(t *testing.T) {
 
 	mockStorage := mock.NewMockStorage(ctrl)
 	svc := service.NewService(mockStorage)
-	h := New(svc, "http://localhost:8080")
+	h := New(svc, "http://localhost:8080", nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(""))
 	w := httptest.NewRecorder()
@@ -62,7 +64,7 @@ func TestGetHandler_Success(t *testing.T) {
 	mockStorage.EXPECT().Get("abc123").Return("https://example.com", true)
 
 	svc := service.NewService(mockStorage)
-	h := New(svc, "http://localhost:8080")
+	h := New(svc, "http://localhost:8080", nil)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/{id}", h.GetHandler)
@@ -90,7 +92,7 @@ func TestGetHandler_NotFound(t *testing.T) {
 	mockStorage.EXPECT().Get("nonexistent").Return("", false)
 
 	svc := service.NewService(mockStorage)
-	h := New(svc, "http://localhost:8080")
+	h := New(svc, "http://localhost:8080", nil)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/{id}", h.GetHandler)
@@ -113,7 +115,7 @@ func TestAPIShortenHandler_Success(t *testing.T) {
 	mockStorage.EXPECT().Save(gomock.Any(), "https://example.com").Return(nil)
 
 	svc := service.NewService(mockStorage)
-	h := New(svc, "http://localhost:8080")
+	h := New(svc, "http://localhost:8080", nil)
 
 	body := `{"url":"https://example.com"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/shorten", strings.NewReader(body))
@@ -143,7 +145,7 @@ func TestAPIShortenHandler_InvalidJSON(t *testing.T) {
 
 	mockStorage := mock.NewMockStorage(ctrl)
 	svc := service.NewService(mockStorage)
-	h := New(svc, "http://localhost:8080")
+	h := New(svc, "http://localhost:8080", nil)
 
 	body := `{invalid json}`
 	req := httptest.NewRequest(http.MethodPost, "/api/shorten", strings.NewReader(body))
@@ -163,7 +165,7 @@ func TestAPIShortenHandler_EmptyURL(t *testing.T) {
 
 	mockStorage := mock.NewMockStorage(ctrl)
 	svc := service.NewService(mockStorage)
-	h := New(svc, "http://localhost:8080")
+	h := New(svc, "http://localhost:8080", nil)
 
 	body := `{"url":""}`
 	req := httptest.NewRequest(http.MethodPost, "/api/shorten", strings.NewReader(body))
@@ -174,5 +176,69 @@ func TestAPIShortenHandler_EmptyURL(t *testing.T) {
 
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("ожидался статус %d, получен %d", http.StatusBadRequest, w.Code)
+	}
+}
+
+func TestPingHandler_NoDatabase(t *testing.T) {
+	svc := service.NewService(nil)
+	h := New(svc, "http://localhost:8080", nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/ping", nil)
+	w := httptest.NewRecorder()
+
+	h.PingHandler(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("ожидался статус %d при отсутствии БД, получен %d", http.StatusInternalServerError, w.Code)
+	}
+}
+
+func TestPingHandler_WithMockDatabase(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockStorage := mock.NewMockStorage(ctrl)
+	svc := service.NewService(mockStorage)
+
+	mockDB := &db.MockDatabase{
+		PingFunc: func() error {
+			return nil
+		},
+	}
+
+	h := New(svc, "http://localhost:8080", mockDB)
+
+	req := httptest.NewRequest(http.MethodGet, "/ping", nil)
+	w := httptest.NewRecorder()
+
+	h.PingHandler(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("ожидался статус %d, получен %d", http.StatusOK, w.Code)
+	}
+}
+
+func TestPingHandler_DatabaseError(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockStorage := mock.NewMockStorage(ctrl)
+	svc := service.NewService(mockStorage)
+
+	mockDB := &db.MockDatabase{
+		PingFunc: func() error {
+			return errors.New("connection refused")
+		},
+	}
+
+	h := New(svc, "http://localhost:8080", mockDB)
+
+	req := httptest.NewRequest(http.MethodGet, "/ping", nil)
+	w := httptest.NewRecorder()
+
+	h.PingHandler(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("ожидался статус %d при ошибке БД, получен %d", http.StatusInternalServerError, w.Code)
 	}
 }
