@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/tradekmv/shortener.git/internal/db"
 	"github.com/tradekmv/shortener.git/internal/service"
 )
 
@@ -23,13 +24,31 @@ type ShortenerResponse struct {
 type ShortenerHandler struct {
 	service *service.Service
 	baseURL string
+	db      db.Pinger
 }
 
-func New(service *service.Service, baseURL string) *ShortenerHandler {
+func New(service *service.Service, baseURL string, db db.Pinger) *ShortenerHandler {
 	return &ShortenerHandler{
 		service: service,
 		baseURL: baseURL,
+		db:      db,
 	}
+}
+
+// PingHandler проверяет соединение с базой данных
+func (h *ShortenerHandler) PingHandler(w http.ResponseWriter, r *http.Request) {
+	if h.db == nil {
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	if err := h.db.Ping(); err != nil {
+		log.Printf("Ошибка проверки соединения с БД: %v", err)
+		w.WriteHeader(http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
 }
 
 // PostHandler обрабатывает POST запросы для создания короткой ссылки
