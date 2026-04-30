@@ -9,7 +9,6 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/tradekmv/shortener.git/internal/config"
-	"github.com/tradekmv/shortener.git/internal/db"
 	"github.com/tradekmv/shortener.git/internal/handler"
 	"github.com/tradekmv/shortener.git/internal/middleware"
 	"github.com/tradekmv/shortener.git/internal/repository/storage"
@@ -30,7 +29,7 @@ func main() {
 
 	// Выбираем хранилище в зависимости от конфигурации
 	var store storage.Storage
-	var dbPinger db.Pinger
+	var dbPinger storage.Pinger
 
 	// 1. Пытаемся использовать PostgreSQL
 	if cfg.DatabaseDSN != "" {
@@ -119,6 +118,3 @@ func main() {
 	}
 	middleware.Log.Println("Сервер остановлен")
 }
-
-// Compile-time проверка, что db.Database реализует db.Pinger
-var _ db.Pinger = (*db.Database)(nil)

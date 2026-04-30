@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/url"
@@ -84,6 +85,14 @@ func (h *ShortenerHandler) PostHandler(w http.ResponseWriter, r *http.Request) {
 
 	shortID, err := h.service.Save(r.Context(), originalURL)
 	if err != nil {
+		if errors.Is(err, storage.ErrURLAlreadyExists) {
+			// URL уже существует — возвращаем 409 Conflict с коротким URL
+			shortURL, _ := url.JoinPath(h.baseURL, shortID)
+			w.Header().Set("Content-Type", "text/plain")
+			w.WriteHeader(http.StatusConflict)
+			w.Write([]byte(shortURL))
+			return
+		}
 		middleware.Log.Printf("Ошибка сохранения URL: %v", err)
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
@@ -138,6 +147,14 @@ func (h *ShortenerHandler) APIShortenHandler(w http.ResponseWriter, r *http.Requ
 
 	shortID, err := h.service.Save(r.Context(), req.URL)
 	if err != nil {
+		if errors.Is(err, storage.ErrURLAlreadyExists) {
+			// URL уже существует — возвращаем 409 Conflict с коротким URL в JSON формате
+			shortURL, _ := url.JoinPath(h.baseURL, shortID)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusConflict)
+			json.NewEncoder(w).Encode(ShortenerResponse{Result: shortURL})
+			return
+		}
 		middleware.Log.Printf("Ошибка сохранения URL: %v", err)
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return

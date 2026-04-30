@@ -18,6 +18,11 @@ const (
 
 var ErrMaxRetriesExceeded = errors.New("не удалось сгенерировать уникальный ID после максимального количества попыток")
 
+// PostgresStorageGetter интерфейс для хранилищ с поддержкой поиска по original_url
+type PostgresStorageGetter interface {
+	GetByOriginalURL(originalURL string) (string, bool)
+}
+
 type Service struct {
 	storage storage.Storage
 }
@@ -36,6 +41,17 @@ func (s *Service) Save(ctx context.Context, originalURL string) (string, error) 
 		err = s.storage.Save(id, originalURL)
 		if err == nil {
 			return id, nil
+		}
+
+		// Если URL уже существует (нарушение уникального индекса на original_url)
+		if errors.Is(err, storage.ErrURLAlreadyExists) {
+			// Пытаемся получить существующий shortURL по originalURL
+			if getter, ok := s.storage.(PostgresStorageGetter); ok {
+				if existingID, found := getter.GetByOriginalURL(originalURL); found {
+					return existingID, err // Возвращаем ошибку, чтобы вызывающий код знал, что URL уже существует
+				}
+			}
+			return "", err
 		}
 
 		if !errors.Is(err, storage.ErrAlreadyExists) {
