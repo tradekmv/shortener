@@ -3,12 +3,12 @@ package handler
 import (
 	"encoding/json"
 	"io"
-	"log"
 	"net/http"
 	"net/url"
 	"strings"
 
 	"github.com/tradekmv/shortener.git/internal/db"
+	"github.com/tradekmv/shortener.git/internal/middleware"
 	"github.com/tradekmv/shortener.git/internal/service"
 )
 
@@ -43,7 +43,7 @@ func (h *ShortenerHandler) PingHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.db.Ping(); err != nil {
-		log.Printf("Ошибка проверки соединения с БД: %v", err)
+		middleware.Log.Printf("Ошибка проверки соединения с БД: %v", err)
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
@@ -60,7 +60,7 @@ func (h *ShortenerHandler) PostHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func(body io.ReadCloser) {
 		if err := body.Close(); err != nil {
-			log.Printf("Ошибка закрытия тела запроса: %v", err)
+			middleware.Log.Printf("Ошибка закрытия тела запроса: %v", err)
 		}
 	}(r.Body)
 
@@ -72,7 +72,7 @@ func (h *ShortenerHandler) PostHandler(w http.ResponseWriter, r *http.Request) {
 
 	shortID, err := h.service.Save(r.Context(), originalURL)
 	if err != nil {
-		log.Printf("Ошибка сохранения URL: %v", err)
+		middleware.Log.Printf("Ошибка сохранения URL: %v", err)
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
@@ -126,7 +126,7 @@ func (h *ShortenerHandler) APIShortenHandler(w http.ResponseWriter, r *http.Requ
 
 	shortID, err := h.service.Save(r.Context(), req.URL)
 	if err != nil {
-		log.Printf("Ошибка сохранения URL: %v", err)
+		middleware.Log.Printf("Ошибка сохранения URL: %v", err)
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
