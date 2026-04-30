@@ -24,6 +24,8 @@ type URLRecord struct {
 type Storage interface {
 	Save(shortID, originalURL string) error
 	Get(shortID string) (string, bool)
+	// SaveBatch saves multiple URLs in one operation.
+	SaveBatch(urls []URLRecord) ([]URLRecord, error)
 	Close() error
 	Ping() error
 }
@@ -116,6 +118,35 @@ func (s *Shortener) Get(shortID string) (string, bool) {
 	defer s.mu.RUnlock()
 	originalURL, ok := s.storage[shortID]
 	return originalURL, ok
+}
+
+// SaveBatch saves multiple URLs in one operation for file storage
+func (s *Shortener) SaveBatch(urls []URLRecord) ([]URLRecord, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	result := make([]URLRecord, 0, len(urls))
+	for _, rec := range urls {
+		if existingURL, ok := s.storage[rec.ShortURL]; ok {
+			if existingURL == rec.OriginalURL {
+				result = append(result, URLRecord{
+					ShortURL:    rec.ShortURL,
+					OriginalURL: rec.OriginalURL,
+				})
+			}
+			continue
+		}
+		s.storage[rec.ShortURL] = rec.OriginalURL
+		result = append(result, URLRecord{
+			ShortURL:    rec.ShortURL,
+			OriginalURL: rec.OriginalURL,
+		})
+	}
+
+	if err := s.saveToFile(); err != nil {
+		return nil, fmt.Errorf("ошибка сохранения в файл: %w", err)
+	}
+	return result, nil
 }
 
 // Close закрывает хранилище (пустая реализация для файлового хранилища)
