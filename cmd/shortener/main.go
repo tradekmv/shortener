@@ -13,68 +13,35 @@ import (
 	"github.com/tradekmv/shortener.git/internal/middleware"
 	"github.com/tradekmv/shortener.git/internal/repository/storage"
 	"github.com/tradekmv/shortener.git/internal/service"
+	"github.com/tradekmv/shortener.git/pkg/logger"
+	"github.com/tradekmv/shortener.git/pkg/registry"
 )
 
 func main() {
+	log := logger.New()
+
+	// Registry для управления ресурсами
+	reg := registry.New()
+
 	cfg, err := config.Load()
 	if err != nil {
-		middleware.Log.Printf("Ошибка парсинга флагов: %v", err)
+		log.Printf("Ошибка парсинга флагов: %v", err)
 		os.Exit(1)
 	}
 
 	r := chi.NewRouter()
 
-	r.Use(middleware.LoggingMiddleware)
+	r.Use(func(next http.Handler) http.Handler {
+		return middleware.LoggingMiddleware(next, log)
+	})
 	r.Use(middleware.GzipMiddleware)
 
 	// Выбираем хранилище в зависимости от конфигурации
-	var store storage.Storage
-	var dbPinger storage.Pinger
-
-	// 1. Пытаемся использовать PostgreSQL
-	if cfg.DatabaseDSN != "" {
-		postgresStore, err := storage.NewPostgres(cfg.DatabaseDSN)
-		if err != nil {
-			middleware.Log.Printf("Ошибка подключения к PostgreSQL: %v", err)
-			// Fallback к файловому хранилищу
-			if cfg.FileStoragePath != "" {
-				middleware.Log.Println("Используем файловый fallback")
-				store, err = storage.New(cfg.FileStoragePath)
-				if err != nil {
-					middleware.Log.Printf("Ошибка инициализации файлового хранилища: %v", err)
-					os.Exit(1)
-				}
-			} else {
-				// Fallback к памяти
-				middleware.Log.Println("Используем хранилище в памяти")
-				store = storage.NewMemory()
-			}
-		} else {
-			store = postgresStore
-			dbPinger = postgresStore
-			middleware.Log.Println("Используем PostgreSQL хранилище")
-		}
-	} else {
-		// 2. Пытаемся использовать файловое хранилище
-		if cfg.FileStoragePath != "" {
-			store, err = storage.New(cfg.FileStoragePath)
-			if err != nil {
-				middleware.Log.Printf("Ошибка инициализации файлового хранилища: %v", err)
-				// Fallback к памяти
-				middleware.Log.Println("Используем хранилище в памяти")
-				store = storage.NewMemory()
-			} else {
-				middleware.Log.Println("Используем файловый storage")
-			}
-		} else {
-			// 3. Используем память
-			store = storage.NewMemory()
-			middleware.Log.Println("Используем хранилище в памяти")
-		}
-	}
+	store := initStorage(cfg, log)
+	reg.Register(store)
 
 	svc := service.NewService(store)
-	h := handler.New(svc, cfg.BaseURL, dbPinger)
+	h := handler.New(svc, cfg.BaseURL, store, log)
 
 	r.Get("/ping", h.PingHandler)
 	r.Post("/", h.PostHandler)
@@ -92,9 +59,9 @@ func main() {
 
 	// Запуск сервера в горутине
 	go func() {
-		middleware.Log.Printf("Сервер запущен на %s", addr)
+		log.Printf("Сервер запущен на %s", addr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			middleware.Log.Printf("Ошибка сервера: %v", err)
+			log.Printf("Ошибка сервера: %v", err)
 			os.Exit(1)
 		}
 	}()
@@ -104,17 +71,42 @@ func main() {
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 	<-quit
 
-	middleware.Log.Println("Завершение работы сервера...")
+	log.Println("Завершение работы сервера...")
 
-	// Закрываем хранилище
-	if store != nil {
-		if err := store.Close(); err != nil {
-			middleware.Log.Printf("Ошибка закрытия хранилища: %v", err)
-		}
+	// Закрываем все ресурсы через registry
+	if err := reg.CloseAll(); err != nil {
+		log.Printf("Ошибка закрытия ресурсов: %v", err)
 	}
 
 	if err := srv.Shutdown(context.TODO()); err != nil {
-		middleware.Log.Printf("Ошибка при завершении: %v", err)
+		log.Printf("Ошибка при завершении: %v", err)
 	}
-	middleware.Log.Println("Сервер остановлен")
+	log.Println("Сервер остановлен")
+}
+
+// initStorage выбирает хранилище с учётом конфигурации и fallback-логикой
+func initStorage(cfg *config.Config, log *logger.Logger) storage.Storage {
+	// 1. PostgreSQL
+	if cfg.DatabaseDSN != "" {
+		store, err := storage.NewPostgres(cfg.DatabaseDSN)
+		if err == nil {
+			log.Println("Используем PostgreSQL хранилище")
+			return store
+		}
+		log.Printf("Ошибка подключения к PostgreSQL: %v", err)
+	}
+
+	// 2. Файловое хранилище
+	if cfg.FileStoragePath != "" {
+		store, err := storage.New(cfg.FileStoragePath)
+		if err == nil {
+			log.Println("Используем файловый storage")
+			return store
+		}
+		log.Printf("Ошибка инициализации файлового хранилища: %v", err)
+	}
+
+	// 3. Память (fallback)
+	log.Println("Используем хранилище в памяти")
+	return storage.NewMemory()
 }
