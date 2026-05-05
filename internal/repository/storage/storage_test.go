@@ -1,6 +1,8 @@
 package storage
 
 import (
+	"context"
+	"errors"
 	"sync"
 	"testing"
 )
@@ -10,14 +12,14 @@ func TestShortener_Save(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ошибка создания хранилища: %v", err)
 	}
-	err = s.Save("abc123", "https://example.com")
+	err = s.Save(context.Background(), "abc123", "https://example.com")
 	if err != nil {
 		t.Errorf("неожиданная ошибка: %v", err)
 	}
 
-	url, ok := s.Get("abc123")
-	if !ok {
-		t.Errorf("ожидалось, что ключ 'abc123' существует")
+	url, err := s.Get(context.Background(), "abc123")
+	if err != nil {
+		t.Errorf("неожиданная ошибка: %v", err)
 	}
 	if url != "https://example.com" {
 		t.Errorf("ожидался URL 'https://example.com', получен '%s'", url)
@@ -29,11 +31,11 @@ func TestShortener_Get_Found(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ошибка создания хранилища: %v", err)
 	}
-	s.Save("abc123", "https://example.com")
+	s.Save(context.Background(), "abc123", "https://example.com")
 
-	url, ok := s.Get("abc123")
-	if !ok {
-		t.Errorf("ожидалось, что ключ 'abc123' существует")
+	url, err := s.Get(context.Background(), "abc123")
+	if err != nil {
+		t.Errorf("неожиданная ошибка: %v", err)
 	}
 	if url != "https://example.com" {
 		t.Errorf("ожидался URL 'https://example.com', получен '%s'", url)
@@ -46,9 +48,9 @@ func TestShortener_Get_NotFound(t *testing.T) {
 		t.Fatalf("ошибка создания хранилища: %v", err)
 	}
 
-	_, ok := s.Get("nonexistent")
-	if ok {
-		t.Errorf("ожидалось, что ключ 'nonexistent' не существует")
+	_, err = s.Get(context.Background(), "nonexistent")
+	if !errors.Is(err, ErrNotFound) {
+		t.Errorf("ожидалась ошибка ErrNotFound, получена: %v", err)
 	}
 }
 
@@ -57,7 +59,7 @@ func TestShortener_Save_Success(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ошибка создания хранилища: %v", err)
 	}
-	err = s.Save("abc123", "https://example.com")
+	err = s.Save(context.Background(), "abc123", "https://example.com")
 	if err != nil {
 		t.Errorf("неожиданная ошибка: %v", err)
 	}
@@ -74,7 +76,7 @@ func TestShortener_Concurrent(t *testing.T) {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
-			s.Save(string(rune('a'+id%26))+string(rune('0'+id%10)), "https://example.com")
+			s.Save(context.Background(), string(rune('a'+id%26))+string(rune('0'+id%10)), "https://example.com")
 		}(i)
 	}
 	wg.Wait()

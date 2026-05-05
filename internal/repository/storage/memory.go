@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"context"
 	"sync"
 )
 
@@ -18,7 +19,7 @@ func NewMemory() *MemoryStorage {
 }
 
 // Save сохраняет пару shortURL → originalURL
-func (s *MemoryStorage) Save(shortID, originalURL string) error {
+func (s *MemoryStorage) Save(ctx context.Context, shortID, originalURL string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -30,16 +31,19 @@ func (s *MemoryStorage) Save(shortID, originalURL string) error {
 }
 
 // Get возвращает originalURL по shortID
-func (s *MemoryStorage) Get(shortID string) (string, bool) {
+func (s *MemoryStorage) Get(ctx context.Context, shortID string) (string, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	url, ok := s.storage[shortID]
-	return url, ok
+	if !ok {
+		return "", ErrNotFound
+	}
+	return url, nil
 }
 
 // SaveBatch saves multiple URLs in one operation for memory storage
-func (s *MemoryStorage) SaveBatch(urls []URLRecord) ([]URLRecord, error) {
+func (s *MemoryStorage) SaveBatch(ctx context.Context, urls []URLRecord) ([]URLRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 

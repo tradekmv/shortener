@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -10,8 +11,6 @@ import (
 )
 
 // ErrURLAlreadyExists - ошибка, возвращаемая при попытке сохранить уже существующий URL
-var ErrURLAlreadyExists = errors.New("URL уже существует")
-
 // PostgresStorage хранит данные в PostgreSQL
 type PostgresStorage struct {
 	db *sql.DB
@@ -62,7 +61,7 @@ func (s *PostgresStorage) migrate() error {
 
 // Save сохраняет пару shortURL → originalURL
 // Возвращает ErrURLAlreadyExists если original_url уже существует в базе
-func (s *PostgresStorage) Save(shortID, originalURL string) error {
+func (s *PostgresStorage) Save(ctx context.Context, shortID, originalURL string) error {
 	query := `INSERT INTO urls (short_url, original_url) VALUES ($1, $2)`
 	_, err := s.db.Exec(query, shortID, originalURL)
 	if err != nil {
@@ -80,17 +79,17 @@ func (s *PostgresStorage) Save(shortID, originalURL string) error {
 }
 
 // Get возвращает originalURL по shortID
-func (s *PostgresStorage) Get(shortID string) (string, bool) {
+func (s *PostgresStorage) Get(ctx context.Context, shortID string) (string, error) {
 	var originalURL string
 	err := s.db.QueryRow("SELECT original_url FROM urls WHERE short_url = $1", shortID).Scan(&originalURL)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return "", false
+			return "", ErrNotFound
 		}
 		log.Error().Err(err).Msg("Ошибка чтения из БД")
-		return "", false
+		return "", err
 	}
-	return originalURL, true
+	return originalURL, nil
 }
 
 // GetByOriginalURL возвращает shortURL по originalURL
@@ -108,7 +107,7 @@ func (s *PostgresStorage) GetByOriginalURL(originalURL string) (string, bool) {
 }
 
 // SaveBatch saves multiple URLs in one transaction for PostgreSQL
-func (s *PostgresStorage) SaveBatch(urls []URLRecord) ([]URLRecord, error) {
+func (s *PostgresStorage) SaveBatch(ctx context.Context, urls []URLRecord) ([]URLRecord, error) {
 	tx, err := s.db.Begin()
 	if err != nil {
 		return nil, fmt.Errorf("ошибка начала транзакции: %w", err)

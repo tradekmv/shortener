@@ -45,7 +45,7 @@ func TestSave_Success(t *testing.T) {
 	svc := NewService(mockRepo)
 
 	mockRepo.EXPECT().
-		Save(gomock.Any(), "https://example.com").
+		Save(gomock.Any(), gomock.Any(), "https://example.com").
 		Return(nil)
 
 	id, err := svc.Save(context.Background(), "https://example.com")
@@ -68,7 +68,7 @@ func TestSave_AnyInput(t *testing.T) {
 	svc := NewService(mockRepo)
 
 	mockRepo.EXPECT().
-		Save(gomock.Any(), "invalid-url").
+		Save(gomock.Any(), gomock.Any(), "invalid-url").
 		Return(nil)
 
 	id, err := svc.Save(context.Background(), "invalid-url")
@@ -88,12 +88,12 @@ func TestGet_Found(t *testing.T) {
 	svc := NewService(mockRepo)
 
 	mockRepo.EXPECT().
-		Get("abc123").
-		Return("https://example.com", true)
+		Get(gomock.Any(), "abc123").
+		Return("https://example.com", nil)
 
-	url, found := svc.Get("abc123")
-	if !found {
-		t.Errorf("ожидалось найти ID 'abc123'")
+	url, err := svc.Get(context.Background(), "abc123")
+	if err != nil {
+		t.Errorf("неожиданная ошибка: %v", err)
 	}
 	if url != "https://example.com" {
 		t.Errorf("ожидался URL 'https://example.com', получен '%s'", url)
@@ -108,12 +108,12 @@ func TestGet_NotFound(t *testing.T) {
 	svc := NewService(mockRepo)
 
 	mockRepo.EXPECT().
-		Get("nonexistent").
-		Return("", false)
+		Get(gomock.Any(), "nonexistent").
+		Return("", storage.ErrNotFound)
 
-	_, found := svc.Get("nonexistent")
-	if found {
-		t.Errorf("ожидалось не найти ID 'nonexistent'")
+	_, err := svc.Get(context.Background(), "nonexistent")
+	if err == nil {
+		t.Errorf("ожидалась ошибка ErrNotFound")
 	}
 }
 
@@ -125,7 +125,7 @@ func TestSave_GeneratesUniqueIDs(t *testing.T) {
 	svc := NewService(mockRepo)
 
 	mockRepo.EXPECT().
-		Save(gomock.Any(), gomock.Any()).
+		Save(gomock.Any(), gomock.Any(), gomock.Any()).
 		Return(nil).
 		Times(100)
 
@@ -194,8 +194,8 @@ func TestSaveBatch_Success(t *testing.T) {
 	}
 
 	// Mock SaveBatch for batch save operation
-	mockRepo.EXPECT().SaveBatch(gomock.Any()).DoAndReturn(
-		func(urls []storage.URLRecord) ([]storage.URLRecord, error) {
+	mockRepo.EXPECT().SaveBatch(gomock.Any(), gomock.Any()).DoAndReturn(
+		func(ctx context.Context, urls []storage.URLRecord) ([]storage.URLRecord, error) {
 			return urls, nil
 		},
 	).Times(1)
@@ -224,8 +224,8 @@ func TestSaveBatch_EmptyInput(t *testing.T) {
 	urls := []storage.URLRecord{}
 
 	// Mock SaveBatch for empty batch
-	mockRepo.EXPECT().SaveBatch(gomock.Any()).DoAndReturn(
-		func(urls []storage.URLRecord) ([]storage.URLRecord, error) {
+	mockRepo.EXPECT().SaveBatch(gomock.Any(), gomock.Any()).DoAndReturn(
+		func(ctx context.Context, urls []storage.URLRecord) ([]storage.URLRecord, error) {
 			return []storage.URLRecord{}, nil
 		},
 	).Times(1)

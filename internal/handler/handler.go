@@ -8,7 +8,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/tradekmv/shortener.git/internal/middleware"
+	"github.com/rs/zerolog"
 	"github.com/tradekmv/shortener.git/internal/repository/storage"
 	"github.com/tradekmv/shortener.git/internal/service"
 )
@@ -37,30 +37,24 @@ type BatchResponseItem struct {
 type ShortenerHandler struct {
 	service *service.Service
 	baseURL string
-	db      storage.Pinger
+	log     *zerolog.Logger
 }
 
-func New(service *service.Service, baseURL string, db storage.Pinger) *ShortenerHandler {
+func New(service *service.Service, baseURL string, store storage.Storage, log *zerolog.Logger) *ShortenerHandler {
 	return &ShortenerHandler{
 		service: service,
 		baseURL: baseURL,
-		db:      db,
+		log:     log,
 	}
 }
 
 // PingHandler проверяет соединение с хранилищем
 func (h *ShortenerHandler) PingHandler(w http.ResponseWriter, r *http.Request) {
-	if h.db == nil {
-		w.WriteHeader(http.StatusInternalServerError)
+	if err := h.service.Ping(); err != nil {
+		h.log.Printf("Ошибка проверки соединения: %v", err)
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
-
-	if err := h.db.Ping(); err != nil {
-		middleware.Log.Printf("Ошибка проверки соединения: %v", err)
-		w.WriteHeader(http.StatusInternalServerError)
-		return
-	}
-
 	w.WriteHeader(http.StatusOK)
 }
 
@@ -73,7 +67,7 @@ func (h *ShortenerHandler) PostHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func(body io.ReadCloser) {
 		if err := body.Close(); err != nil {
-			middleware.Log.Printf("Ошибка закрытия тела запроса: %v", err)
+			h.log.Printf("Ошибка закрытия тела запроса: %v", err)
 		}
 	}(r.Body)
 
@@ -85,7 +79,7 @@ func (h *ShortenerHandler) PostHandler(w http.ResponseWriter, r *http.Request) {
 
 	shortID, err := h.service.Save(r.Context(), originalURL)
 	if err != nil {
-		if errors.Is(err, storage.ErrURLAlreadyExists) {
+		if errors.Is(err, service.ErrURLAlreadyExists) {
 			// URL уже существует — возвращаем 409 Conflict с коротким URL
 			shortURL, _ := url.JoinPath(h.baseURL, shortID)
 			w.Header().Set("Content-Type", "text/plain")
@@ -93,7 +87,7 @@ func (h *ShortenerHandler) PostHandler(w http.ResponseWriter, r *http.Request) {
 			w.Write([]byte(shortURL))
 			return
 		}
-		middleware.Log.Printf("Ошибка сохранения URL: %v", err)
+		h.log.Printf("Ошибка сохранения URL: %v", err)
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
@@ -120,9 +114,14 @@ func (h *ShortenerHandler) GetHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	originalURL, ok := h.service.Get(shortID)
-	if !ok {
-		http.Error(w, "URL не найден", http.StatusNotFound)
+	originalURL, err := h.service.Get(r.Context(), shortID)
+	if err != nil {
+		if errors.Is(err, service.ErrNotFound) {
+			http.Error(w, "URL не найден", http.StatusNotFound)
+			return
+		}
+		h.log.Printf("Ошибка получения URL: %v", err)
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
 
@@ -147,7 +146,7 @@ func (h *ShortenerHandler) APIShortenHandler(w http.ResponseWriter, r *http.Requ
 
 	shortID, err := h.service.Save(r.Context(), req.URL)
 	if err != nil {
-		if errors.Is(err, storage.ErrURLAlreadyExists) {
+		if errors.Is(err, service.ErrURLAlreadyExists) {
 			// URL уже существует — возвращаем 409 Conflict с коротким URL в JSON формате
 			shortURL, _ := url.JoinPath(h.baseURL, shortID)
 			w.Header().Set("Content-Type", "application/json")
@@ -155,7 +154,7 @@ func (h *ShortenerHandler) APIShortenHandler(w http.ResponseWriter, r *http.Requ
 			json.NewEncoder(w).Encode(ShortenerResponse{Result: shortURL})
 			return
 		}
-		middleware.Log.Printf("Ошибка сохранения URL: %v", err)
+		h.log.Printf("Ошибка сохранения URL: %v", err)
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
@@ -206,7 +205,7 @@ func (h *ShortenerHandler) APIBatchShortenHandler(w http.ResponseWriter, r *http
 	// Generate short IDs
 	results, err := h.service.SaveBatch(r.Context(), records)
 	if err != nil {
-		middleware.Log.Printf("Ошибка batch сохранения: %v", err)
+		h.log.Printf("Ошибка batch сохранения: %v", err)
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
 	}
@@ -216,7 +215,7 @@ func (h *ShortenerHandler) APIBatchShortenHandler(w http.ResponseWriter, r *http
 	for i, rec := range results {
 		shortURL, err := url.JoinPath(h.baseURL, rec.ShortURL)
 		if err != nil {
-			middleware.Log.Printf("Ошибка построения URL: %v", err)
+			h.log.Printf("Ошибка построения URL: %v", err)
 			http.Error(w, "Не удалось построить короткий URL", http.StatusInternalServerError)
 			return
 		}
@@ -232,7 +231,7 @@ func (h *ShortenerHandler) APIBatchShortenHandler(w http.ResponseWriter, r *http
 
 	enc := json.NewEncoder(w)
 	if err := enc.Encode(response); err != nil {
-		middleware.Log.Printf("Ошибка кодирования JSON: %v", err)
+		h.log.Printf("Ошибка кодирования JSON: %v", err)
 		return
 	}
 }

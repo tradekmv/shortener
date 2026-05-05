@@ -16,7 +16,12 @@ const (
 	maxAttempts = 10
 )
 
-var ErrMaxRetriesExceeded = errors.New("не удалось сгенерировать уникальный ID после максимального количества попыток")
+var (
+	ErrMaxRetriesExceeded = errors.New("не удалось сгенерировать уникальный ID после максимального количества попыток")
+	ErrURLAlreadyExists   = errors.New("URL уже существует")
+	ErrAlreadyExists      = errors.New("короткий ID уже существует")
+	ErrNotFound           = errors.New("короткая ссылка не найдена")
+)
 
 // PostgresStorageGetter интерфейс для хранилищ с поддержкой поиска по original_url
 type PostgresStorageGetter interface {
@@ -31,38 +36,60 @@ func NewService(storage storage.Storage) *Service {
 	return &Service{storage: storage}
 }
 
+// Ping проверяет соединение с хранилищем
+func (s *Service) Ping() error {
+	if s.storage == nil {
+		return errors.New("storage is nil")
+	}
+	return s.storage.Ping()
+}
+
+// GetStore возвращает хранилище для доступа к интерфейсу Storage
+func (s *Service) GetStore() storage.Storage {
+	return s.storage
+}
+
 func (s *Service) Save(ctx context.Context, originalURL string) (string, error) {
-	for i := 0; i < maxAttempts; i++ {
+	var lastErr error
+	for attempt := 0; attempt < maxAttempts; attempt++ {
 		id, err := generateID(length)
 		if err != nil {
 			return "", err
 		}
 
-		err = s.storage.Save(id, originalURL)
+		err = s.storage.Save(ctx, id, originalURL)
 		if err == nil {
 			return id, nil
 		}
 
-		// Если URL уже существует (нарушение уникального индекса на original_url)
+		lastErr = err
+
+		// Если URL уже существует — возвращаем сразу (не retry)
 		if errors.Is(err, storage.ErrURLAlreadyExists) {
 			// Пытаемся получить существующий shortURL по originalURL
 			if getter, ok := s.storage.(PostgresStorageGetter); ok {
 				if existingID, found := getter.GetByOriginalURL(originalURL); found {
-					return existingID, err // Возвращаем ошибку, чтобы вызывающий код знал, что URL уже существует
+					return existingID, ErrURLAlreadyExists
 				}
 			}
-			return "", err
+			return "", ErrURLAlreadyExists
 		}
 
-		if !errors.Is(err, storage.ErrAlreadyExists) {
-			return "", fmt.Errorf("ошибка сохранения ссылки: %w", err)
+		// Если коллизия short ID — пробуем следующую итерацию
+		if errors.Is(err, storage.ErrAlreadyExists) {
+			continue
 		}
+
+		// Любая другая ошибка — завершаем сразу
+		return "", fmt.Errorf("ошибка сохранения ссылки: %w", err)
 	}
-	return "", ErrMaxRetriesExceeded
+
+	// Если исчерпаны все попытки
+	return "", fmt.Errorf("%w: %v", ErrMaxRetriesExceeded, lastErr)
 }
 
-func (s *Service) Get(shortID string) (string, bool) {
-	return s.storage.Get(shortID)
+func (s *Service) Get(ctx context.Context, shortID string) (string, error) {
+	return s.storage.Get(ctx, shortID)
 }
 
 // SaveBatch saves multiple URLs in one operation
@@ -81,7 +108,7 @@ func (s *Service) SaveBatch(ctx context.Context, urls []storage.URLRecord) ([]st
 	}
 
 	// Save all URLs in batch
-	return s.storage.SaveBatch(records)
+	return s.storage.SaveBatch(ctx, records)
 }
 
 func generateID(n int) (string, error) {
