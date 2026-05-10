@@ -13,6 +13,7 @@ type Config struct {
 	ServerAddress   string
 	BaseURL         string
 	FileStoragePath string
+	DatabaseDSN     string
 }
 
 // Load парсит конфигурацию с приоритетом: env > флаг > значение по умолчанию
@@ -25,6 +26,8 @@ func Load() (*Config, error) {
 		flag.StringVar(&cfg.BaseURL, "b", "", "base URL")
 		flag.StringVar(&cfg.FileStoragePath, "f", "", "file storage path")
 		flag.StringVar(&cfg.FileStoragePath, "file-storage-path", "", "file storage path")
+		flag.StringVar(&cfg.DatabaseDSN, "d", "", "database DSN")
+		flag.StringVar(&cfg.DatabaseDSN, "database-dsn", "", "database DSN")
 		flagsParsed = true
 	}
 
@@ -59,6 +62,10 @@ func Load() (*Config, error) {
 		cfg.FileStoragePath = val
 	} else if cfg.FileStoragePath == "" {
 		cfg.FileStoragePath = defaultFileStoragePath
+	}
+
+	if val := os.Getenv("DATABASE_DSN"); val != "" {
+		cfg.DatabaseDSN = val
 	}
 
 	return cfg, nil

@@ -4,7 +4,8 @@ import (
 	"context"
 	"testing"
 
-	"github.com/tradekmv/shortener.git/internal/repository/mock"
+	mock_storage "github.com/tradekmv/shortener.git/internal/repository/mock"
+	"github.com/tradekmv/shortener.git/internal/repository/storage"
 	"go.uber.org/mock/gomock"
 )
 
@@ -40,11 +41,11 @@ func TestSave_Success(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockRepo := mock.NewMockStorage(ctrl)
+	mockRepo := mock_storage.NewMockStorage(ctrl)
 	svc := NewService(mockRepo)
 
 	mockRepo.EXPECT().
-		Save(gomock.Any(), "https://example.com").
+		Save(gomock.Any(), gomock.Any(), "https://example.com").
 		Return(nil)
 
 	id, err := svc.Save(context.Background(), "https://example.com")
@@ -63,11 +64,11 @@ func TestSave_AnyInput(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockRepo := mock.NewMockStorage(ctrl)
+	mockRepo := mock_storage.NewMockStorage(ctrl)
 	svc := NewService(mockRepo)
 
 	mockRepo.EXPECT().
-		Save(gomock.Any(), "invalid-url").
+		Save(gomock.Any(), gomock.Any(), "invalid-url").
 		Return(nil)
 
 	id, err := svc.Save(context.Background(), "invalid-url")
@@ -83,16 +84,16 @@ func TestGet_Found(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockRepo := mock.NewMockStorage(ctrl)
+	mockRepo := mock_storage.NewMockStorage(ctrl)
 	svc := NewService(mockRepo)
 
 	mockRepo.EXPECT().
-		Get("abc123").
-		Return("https://example.com", true)
+		Get(gomock.Any(), "abc123").
+		Return("https://example.com", nil)
 
-	url, found := svc.Get("abc123")
-	if !found {
-		t.Errorf("ожидалось найти ID 'abc123'")
+	url, err := svc.Get(context.Background(), "abc123")
+	if err != nil {
+		t.Errorf("неожиданная ошибка: %v", err)
 	}
 	if url != "https://example.com" {
 		t.Errorf("ожидался URL 'https://example.com', получен '%s'", url)
@@ -103,16 +104,16 @@ func TestGet_NotFound(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockRepo := mock.NewMockStorage(ctrl)
+	mockRepo := mock_storage.NewMockStorage(ctrl)
 	svc := NewService(mockRepo)
 
 	mockRepo.EXPECT().
-		Get("nonexistent").
-		Return("", false)
+		Get(gomock.Any(), "nonexistent").
+		Return("", storage.ErrNotFound)
 
-	_, found := svc.Get("nonexistent")
-	if found {
-		t.Errorf("ожидалось не найти ID 'nonexistent'")
+	_, err := svc.Get(context.Background(), "nonexistent")
+	if err == nil {
+		t.Errorf("ожидалась ошибка ErrNotFound")
 	}
 }
 
@@ -120,11 +121,11 @@ func TestSave_GeneratesUniqueIDs(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	mockRepo := mock.NewMockStorage(ctrl)
+	mockRepo := mock_storage.NewMockStorage(ctrl)
 	svc := NewService(mockRepo)
 
 	mockRepo.EXPECT().
-		Save(gomock.Any(), gomock.Any()).
+		Save(gomock.Any(), gomock.Any(), gomock.Any()).
 		Return(nil).
 		Times(100)
 
@@ -177,5 +178,63 @@ func TestGenerateID_Uniqueness(t *testing.T) {
 			t.Fatalf("неожиданная ошибка: %v", err)
 		}
 		_ = ids[id]
+	}
+}
+
+func TestSaveBatch_Success(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockRepo := mock_storage.NewMockStorage(ctrl)
+	svc := NewService(mockRepo)
+
+	urls := []storage.URLRecord{
+		{OriginalURL: "https://example.com/1"},
+		{OriginalURL: "https://example.com/2"},
+	}
+
+	// Mock SaveBatch for batch save operation
+	mockRepo.EXPECT().SaveBatch(gomock.Any(), gomock.Any()).DoAndReturn(
+		func(ctx context.Context, urls []storage.URLRecord) ([]storage.URLRecord, error) {
+			return urls, nil
+		},
+	).Times(1)
+
+	results, err := svc.SaveBatch(context.Background(), urls)
+	if err != nil {
+		t.Errorf("неожиданная ошибка: %v", err)
+	}
+	if len(results) != 2 {
+		t.Errorf("ожидалось 2 результата, получено %d", len(results))
+	}
+	for _, rec := range results {
+		if rec.ShortURL == "" {
+			t.Errorf("ожидался непустой ShortURL")
+		}
+	}
+}
+
+func TestSaveBatch_EmptyInput(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockRepo := mock_storage.NewMockStorage(ctrl)
+	svc := NewService(mockRepo)
+
+	urls := []storage.URLRecord{}
+
+	// Mock SaveBatch for empty batch
+	mockRepo.EXPECT().SaveBatch(gomock.Any(), gomock.Any()).DoAndReturn(
+		func(ctx context.Context, urls []storage.URLRecord) ([]storage.URLRecord, error) {
+			return []storage.URLRecord{}, nil
+		},
+	).Times(1)
+
+	results, err := svc.SaveBatch(context.Background(), urls)
+	if err != nil {
+		t.Errorf("неожиданная ошибка: %v", err)
+	}
+	if len(results) != 0 {
+		t.Errorf("ожидалось 0 результатов, получено %d", len(results))
 	}
 }

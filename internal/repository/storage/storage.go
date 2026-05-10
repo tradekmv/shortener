@@ -1,6 +1,9 @@
+//go:generate mockgen -source=storage.go -destination=mock/mock.go
+
 package storage
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,7 +13,11 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-var ErrAlreadyExists = errors.New("короткая ссылка уже существует")
+var (
+	ErrAlreadyExists    = errors.New("короткая ссылка уже существует")
+	ErrURLAlreadyExists = errors.New("URL уже существует")
+	ErrNotFound         = errors.New("короткая ссылка не найдена")
+)
 
 type URLRecord struct {
 	UUID        string `json:"uuid"`
@@ -18,9 +25,19 @@ type URLRecord struct {
 	OriginalURL string `json:"original_url"`
 }
 
+// Storage интерфейс хранилища
 type Storage interface {
-	Save(shortID, originalURL string) error
-	Get(shortID string) (string, bool)
+	Save(ctx context.Context, shortID, originalURL string) error
+	Get(ctx context.Context, shortID string) (string, error)
+	// SaveBatch saves multiple URLs in one operation.
+	SaveBatch(ctx context.Context, urls []URLRecord) ([]URLRecord, error)
+	Close() error
+	Ping() error
+}
+
+// Pinger интерфейс для проверки соединения
+type Pinger interface {
+	Ping() error
 }
 
 type Shortener struct {
@@ -86,7 +103,7 @@ func (s *Shortener) saveToFile() error {
 	return nil
 }
 
-func (s *Shortener) Save(shortID, originalURL string) error {
+func (s *Shortener) Save(ctx context.Context, shortID, originalURL string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -101,9 +118,51 @@ func (s *Shortener) Save(shortID, originalURL string) error {
 	return nil
 }
 
-func (s *Shortener) Get(shortID string) (string, bool) {
+func (s *Shortener) Get(ctx context.Context, shortID string) (string, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	originalURL, ok := s.storage[shortID]
-	return originalURL, ok
+	if !ok {
+		return "", ErrNotFound
+	}
+	return originalURL, nil
+}
+
+// SaveBatch saves multiple URLs in one operation for file storage
+func (s *Shortener) SaveBatch(ctx context.Context, urls []URLRecord) ([]URLRecord, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	result := make([]URLRecord, 0, len(urls))
+	for _, rec := range urls {
+		if existingURL, ok := s.storage[rec.ShortURL]; ok {
+			if existingURL == rec.OriginalURL {
+				result = append(result, URLRecord{
+					ShortURL:    rec.ShortURL,
+					OriginalURL: rec.OriginalURL,
+				})
+			}
+			continue
+		}
+		s.storage[rec.ShortURL] = rec.OriginalURL
+		result = append(result, URLRecord{
+			ShortURL:    rec.ShortURL,
+			OriginalURL: rec.OriginalURL,
+		})
+	}
+
+	if err := s.saveToFile(); err != nil {
+		return nil, fmt.Errorf("ошибка сохранения в файл: %w", err)
+	}
+	return result, nil
+}
+
+// Close закрывает хранилище (пустая реализация для файлового хранилища)
+func (s *Shortener) Close() error {
+	return nil
+}
+
+// Ping проверяет доступность хранилища
+func (s *Shortener) Ping() error {
+	return nil
 }
