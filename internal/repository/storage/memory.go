@@ -83,3 +83,8 @@ func (s *MemoryStorage) Close() error {
 func (s *MemoryStorage) Ping() error {
 	return nil
 }
+
+// GetUserURLs возвращает все URLs для указанного userID (память не поддерживает множественных пользователей)
+func (s *MemoryStorage) GetUserURLs(ctx context.Context, userID string) ([]URLRecord, error) {
+	return nil, nil
+}

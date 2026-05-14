@@ -31,6 +31,8 @@ type Storage interface {
 	Get(ctx context.Context, shortID string) (string, error)
 	// SaveBatch saves multiple URLs in one operation.
 	SaveBatch(ctx context.Context, urls []URLRecord) ([]URLRecord, error)
+	// GetUserURLs возвращает все URLs для указанного userID
+	GetUserURLs(ctx context.Context, userID string) ([]URLRecord, error)
 	Close() error
 	Ping() error
 }
@@ -165,4 +167,9 @@ func (s *Shortener) Close() error {
 // Ping проверяет доступность хранилища
 func (s *Shortener) Ping() error {
 	return nil
+}
+
+// GetUserURLs возвращает все URLs для указанного userID (файловое хранилище не поддерживает множественных пользователей)
+func (s *Shortener) GetUserURLs(ctx context.Context, userID string) ([]URLRecord, error) {
+	return nil, nil
 }
