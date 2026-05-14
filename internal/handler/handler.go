@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/rs/zerolog"
+	"github.com/tradekmv/shortener.git/internal/auth"
 	"github.com/tradekmv/shortener.git/internal/repository/storage"
 	"github.com/tradekmv/shortener.git/internal/service"
 )
@@ -60,6 +61,12 @@ func (h *ShortenerHandler) PingHandler(w http.ResponseWriter, r *http.Request) {
 
 // PostHandler обрабатывает POST запросы для создания короткой ссылки
 func (h *ShortenerHandler) PostHandler(w http.ResponseWriter, r *http.Request) {
+	// Создаём или получаем userID из cookie
+	userID, err := auth.CreateUserIDIfNeeded(w, r)
+	if err != nil {
+		h.log.Printf("Ошибка создания userID: %v", err)
+	}
+
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		http.Error(w, "Не удалось прочитать тело запроса", http.StatusBadRequest)
@@ -77,7 +84,7 @@ func (h *ShortenerHandler) PostHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	shortID, err := h.service.Save(r.Context(), originalURL)
+	shortID, err := h.service.SaveWithUserID(r.Context(), originalURL, userID)
 	if err != nil {
 		if errors.Is(err, service.ErrURLAlreadyExists) {
 			// URL уже существует — возвращаем 409 Conflict с коротким URL
@@ -131,6 +138,15 @@ func (h *ShortenerHandler) GetHandler(w http.ResponseWriter, r *http.Request) {
 
 // APIShortenHandler обрабатывает POST запросы JSON API для создания короткой ссылки
 func (h *ShortenerHandler) APIShortenHandler(w http.ResponseWriter, r *http.Request) {
+	// Создаём или получаем userID из cookie
+	userID, err := auth.CreateUserIDIfNeeded(w, r)
+	if err != nil {
+		h.log.Printf("Ошибка создания userID: %v", err)
+		// Продолжаем без userID, кука уже должна быть установлена при CreateUserIDIfNeeded
+		// но если была ошибка, используем пустой userID
+		userID = ""
+	}
+
 	var req ShortenerRequest
 
 	dec := json.NewDecoder(r.Body)
@@ -144,7 +160,7 @@ func (h *ShortenerHandler) APIShortenHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	shortID, err := h.service.Save(r.Context(), req.URL)
+	shortID, err := h.service.SaveWithUserID(r.Context(), req.URL, userID)
 	if err != nil {
 		if errors.Is(err, service.ErrURLAlreadyExists) {
 			// URL уже существует — возвращаем 409 Conflict с коротким URL в JSON формате
@@ -234,4 +250,65 @@ func (h *ShortenerHandler) APIBatchShortenHandler(w http.ResponseWriter, r *http
 		h.log.Printf("Ошибка кодирования JSON: %v", err)
 		return
 	}
+}
+
+// GetUserURLsHandler обрабатывает GET /api/user/urls запросы
+func (h *ShortenerHandler) GetUserURLsHandler(w http.ResponseWriter, r *http.Request) {
+	// Пытаемся получить userID из существующей куки или создаём новую
+	userID, err := auth.CreateUserIDIfNeeded(w, r)
+	if err != nil {
+		h.log.Printf("Ошибка создания userID: %v", err)
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+
+	if userID == "" {
+		// Кука содержит пустой user_id
+		http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+		return
+	}
+
+	// Получаем URLs пользователя
+	urls, err := h.service.GetUserURLs(r.Context(), userID)
+	if err != nil {
+		h.log.Printf("Ошибка получения URLs пользователя: %v", err)
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+
+	if len(urls) == 0 {
+		// Нет URLs для пользователя
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	// Формируем ответ
+	response := make([]UserURLResponse, 0, len(urls))
+	for _, rec := range urls {
+		shortURL, err := url.JoinPath(h.baseURL, rec.ShortURL)
+		if err != nil {
+			h.log.Printf("Ошибка построения URL: %v", err)
+			http.Error(w, "Не удалось построить короткий URL", http.StatusInternalServerError)
+			return
+		}
+		response = append(response, UserURLResponse{
+			ShortURL:    shortURL,
+			OriginalURL: rec.OriginalURL,
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+
+	enc := json.NewEncoder(w)
+	if err := enc.Encode(response); err != nil {
+		h.log.Printf("Ошибка кодирования JSON: %v", err)
+		return
+	}
+}
+
+// UserURLResponse структура ответа для /api/user/urls
+type UserURLResponse struct {
+	ShortURL    string `json:"short_url"`
+	OriginalURL string `json:"original_url"`
 }
