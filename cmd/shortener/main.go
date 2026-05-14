@@ -47,6 +47,7 @@ func main() {
 	r.Post("/", h.PostHandler)
 	r.Post("/api/shorten", h.APIShortenHandler)
 	r.Post("/api/shorten/batch", h.APIBatchShortenHandler)
+	r.Get("/api/user/urls", h.GetUserURLsHandler)
 	r.Get("/{id}", h.GetHandler)
 
 	addr := cfg.ServerAddress

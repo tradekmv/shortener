@@ -28,6 +28,11 @@ type PostgresStorageGetter interface {
 	GetByOriginalURL(originalURL string) (string, bool)
 }
 
+// StorageWithUserID интерфейс для хранилищ с поддержкой user_id
+type StorageWithUserID interface {
+	SaveWithUserID(ctx context.Context, shortID, originalURL, userID string) error
+}
+
 type Service struct {
 	storage storage.Storage
 }
@@ -49,7 +54,18 @@ func (s *Service) GetStore() storage.Storage {
 	return s.storage
 }
 
+// Get возвращает оригинальный URL по shortID
+func (s *Service) Get(ctx context.Context, shortID string) (string, error) {
+	return s.storage.Get(ctx, shortID)
+}
+
+// Save saves the original URL and returns the short ID
 func (s *Service) Save(ctx context.Context, originalURL string) (string, error) {
+	return s.SaveWithUserID(ctx, originalURL, "")
+}
+
+// SaveWithUserID saves the original URL with user ID and returns the short ID
+func (s *Service) SaveWithUserID(ctx context.Context, originalURL, userID string) (string, error) {
 	var lastErr error
 	for attempt := 0; attempt < maxAttempts; attempt++ {
 		id, err := generateID(length)
@@ -57,7 +73,13 @@ func (s *Service) Save(ctx context.Context, originalURL string) (string, error) 
 			return "", err
 		}
 
-		err = s.storage.Save(ctx, id, originalURL)
+		// Проверяем, поддерживает ли storage сохранение с userID
+		if saver, ok := s.storage.(StorageWithUserID); ok {
+			err = saver.SaveWithUserID(ctx, id, originalURL, userID)
+		} else {
+			err = s.storage.Save(ctx, id, originalURL)
+		}
+
 		if err == nil {
 			return id, nil
 		}
@@ -75,7 +97,7 @@ func (s *Service) Save(ctx context.Context, originalURL string) (string, error) 
 			return "", ErrURLAlreadyExists
 		}
 
-		// Если коллизия short ID — пробуем следующую итерацию
+		// Если коллизия short id — пробуем следующую итерацию
 		if errors.Is(err, storage.ErrAlreadyExists) {
 			continue
 		}
@@ -88,8 +110,14 @@ func (s *Service) Save(ctx context.Context, originalURL string) (string, error) 
 	return "", fmt.Errorf("%w: %v", ErrMaxRetriesExceeded, lastErr)
 }
 
-func (s *Service) Get(ctx context.Context, shortID string) (string, error) {
+// GetURLByUser retrieves URL by short ID
+func (s *Service) GetURLByUser(ctx context.Context, shortID string) (string, error) {
 	return s.storage.Get(ctx, shortID)
+}
+
+// GetUserURLs returns all URLs for the given user ID
+func (s *Service) GetUserURLs(ctx context.Context, userID string) ([]storage.URLRecord, error) {
+	return s.storage.GetUserURLs(ctx, userID)
 }
 
 // SaveBatch saves multiple URLs in one operation

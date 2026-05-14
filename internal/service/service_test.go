@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	mock_storage "github.com/tradekmv/shortener.git/internal/repository/mock"
 	"github.com/tradekmv/shortener.git/internal/repository/storage"
+	mock_storage "github.com/tradekmv/shortener.git/internal/repository/storage/mock"
 	"go.uber.org/mock/gomock"
 )
 
