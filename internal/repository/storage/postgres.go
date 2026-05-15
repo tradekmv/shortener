@@ -74,6 +74,23 @@ func (s *PostgresStorage) migrate() error {
 		// Не возвращаем ошибку, т.к. колонка может уже существовать
 	}
 
+	// Добавляем колонку is_deleted если её нет
+	addDeletedColumn := `
+	DO $$
+	BEGIN
+		IF NOT EXISTS (
+			SELECT 1 FROM information_schema.columns 
+			WHERE table_name = 'urls' AND column_name = 'is_deleted'
+		) THEN
+			ALTER TABLE urls ADD COLUMN is_deleted BOOLEAN NOT NULL DEFAULT FALSE;
+		END IF;
+	END $$;
+	`
+	_, err = s.db.Exec(addDeletedColumn)
+	if err != nil {
+		log.Warn().Err(err).Msg("Ошибка добавления колонки is_deleted (может уже существовать)")
+	}
+
 	// Создаём индексы
 	indexes := `
 	CREATE INDEX IF NOT EXISTS idx_short_url ON urls(short_url);
@@ -115,13 +132,17 @@ func (s *PostgresStorage) SaveWithUserID(ctx context.Context, shortID, originalU
 // Get возвращает originalURL по shortID
 func (s *PostgresStorage) Get(ctx context.Context, shortID string) (string, error) {
 	var originalURL string
-	err := s.db.QueryRow("SELECT original_url FROM urls WHERE short_url = $1", shortID).Scan(&originalURL)
+	var isDeleted bool
+	err := s.db.QueryRow("SELECT original_url, is_deleted FROM urls WHERE short_url = $1", shortID).Scan(&originalURL, &isDeleted)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return "", ErrNotFound
 		}
 		log.Error().Err(err).Msg("Ошибка чтения из БД")
 		return "", err
+	}
+	if isDeleted {
+		return "", ErrDeletedGone
 	}
 	return originalURL, nil
 }
@@ -205,4 +226,20 @@ func (s *PostgresStorage) GetUserURLs(ctx context.Context, userID string) ([]URL
 	}
 
 	return results, nil
+}
+
+// DeleteUserURLs помечает URLs как удалённые для указанного пользователя (async, batch update)
+func (s *PostgresStorage) DeleteUserURLs(ctx context.Context, userID string, shortIDs []string) error {
+	if len(shortIDs) == 0 {
+		return nil
+	}
+
+	// Используем множественное обновление с ANY для эффективности
+	query := `UPDATE urls SET is_deleted = TRUE WHERE short_url = ANY($1) AND user_id = $2`
+	_, err := s.db.ExecContext(ctx, query, shortIDs, userID)
+	if err != nil {
+		log.Error().Err(err).Msg("Ошибка удаления URLs")
+		return fmt.Errorf("ошибка удаления URLs: %w", err)
+	}
+	return nil
 }
