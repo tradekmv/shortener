@@ -48,18 +48,22 @@ type gzipResponseWriter struct {
 	flushed sync.Once
 }
 
+// Write переопределяет метод Write для записи через gzip
 func (grw *gzipResponseWriter) Write(p []byte) (int, error) {
 	return grw.gz.Write(p)
 }
 
+// WriteHeader переопределяет WriteHeader для ответа через gzip
 func (grw *gzipResponseWriter) WriteHeader(code int) {
 	grw.ResponseWriter.WriteHeader(code)
 }
 
+// Flush принудительно сбрасывает буфер gzip
 func (grw *gzipResponseWriter) Flush() {
 	grw.gz.Flush()
 }
 
+// Header возвращает заголовки ответа
 func (grw *gzipResponseWriter) Header() http.Header {
 	return grw.ResponseWriter.Header()
 }
@@ -68,6 +72,7 @@ func (grw *gzipResponseWriter) close() {
 	grw.gz.Close()
 }
 
+// LoggingMiddleware логирует HTTP-запросы и ответы
 func LoggingMiddleware(next http.Handler, log *zerolog.Logger) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
@@ -85,17 +90,20 @@ func LoggingMiddleware(next http.Handler, log *zerolog.Logger) http.Handler {
 	})
 }
 
+// responseWriter оборачивает http.ResponseWriter для отслеживания статуса
 type responseWriter struct {
 	http.ResponseWriter
 	statusCode int
 	written    int64
 }
 
+// WriteHeader записывает код статуса и отслеживает его
 func (rw *responseWriter) WriteHeader(code int) {
 	rw.statusCode = code
 	rw.ResponseWriter.WriteHeader(code)
 }
 
+// Write записывает тело ответа и отслеживает размер
 func (rw *responseWriter) Write(b []byte) (int, error) {
 	n, err := rw.ResponseWriter.Write(b)
 	rw.written += int64(n)

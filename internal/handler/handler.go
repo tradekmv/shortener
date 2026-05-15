@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -14,10 +15,12 @@ import (
 	"github.com/tradekmv/shortener.git/internal/service"
 )
 
+// ShortenerRequest представляет запрос на создание короткой ссылки
 type ShortenerRequest struct {
 	URL string `json:"url"`
 }
 
+// ShortenerResponse представляет ответ с короткой ссылкой
 type ShortenerResponse struct {
 	Result string `json:"result"`
 }
@@ -41,6 +44,7 @@ type ShortenerHandler struct {
 	log     *zerolog.Logger
 }
 
+// New создает новый экземпляр ShortenerHandler
 func New(service *service.Service, baseURL string, store storage.Storage, log *zerolog.Logger) *ShortenerHandler {
 	return &ShortenerHandler{
 		service: service,
@@ -123,6 +127,10 @@ func (h *ShortenerHandler) GetHandler(w http.ResponseWriter, r *http.Request) {
 
 	originalURL, err := h.service.Get(r.Context(), shortID)
 	if err != nil {
+		if errors.Is(err, service.ErrDeletedGone) {
+			http.Error(w, "URL был удалён", http.StatusGone)
+			return
+		}
 		if errors.Is(err, service.ErrNotFound) {
 			http.Error(w, "URL не найден", http.StatusNotFound)
 			return
@@ -311,4 +319,41 @@ func (h *ShortenerHandler) GetUserURLsHandler(w http.ResponseWriter, r *http.Req
 type UserURLResponse struct {
 	ShortURL    string `json:"short_url"`
 	OriginalURL string `json:"original_url"`
+}
+
+// DeleteUserURLsHandler обрабатывает DELETE /api/user/urls запросы
+func (h *ShortenerHandler) DeleteUserURLsHandler(w http.ResponseWriter, r *http.Request) {
+	userID, err := auth.CreateUserIDIfNeeded(w, r)
+	if err != nil {
+		h.log.Printf("Ошибка создания userID: %v", err)
+		http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+		return
+	}
+
+	if userID == "" {
+		http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+		return
+	}
+
+	var shortIDs []string
+	dec := json.NewDecoder(r.Body)
+	if err := dec.Decode(&shortIDs); err != nil {
+		http.Error(w, "Неверный формат JSON", http.StatusBadRequest)
+		return
+	}
+
+	if len(shortIDs) == 0 {
+		http.Error(w, "Пустой список ID", http.StatusBadRequest)
+		return
+	}
+
+	// Асинхронное удаление — создаём отдельный контекст для горутины
+	go func() {
+		ctx := context.Background()
+		if err := h.service.DeleteUserURLs(ctx, userID, shortIDs); err != nil {
+			h.log.Printf("Ошибка удаления URLs: %v", err)
+		}
+	}()
+
+	w.WriteHeader(http.StatusAccepted)
 }
