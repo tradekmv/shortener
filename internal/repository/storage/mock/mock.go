@@ -55,6 +55,20 @@ func (mr *MockStorageMockRecorder) Close() *gomock.Call {
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Close", reflect.TypeOf((*MockStorage)(nil).Close))
 }
 
+// DeleteUserURLs mocks base method.
+func (m *MockStorage) DeleteUserURLs(ctx context.Context, userID string, shortIDs []string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "DeleteUserURLs", ctx, userID, shortIDs)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// DeleteUserURLs indicates an expected call of DeleteUserURLs.
+func (mr *MockStorageMockRecorder) DeleteUserURLs(ctx, userID any, shortIDs any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteUserURLs", reflect.TypeOf((*MockStorage)(nil).DeleteUserURLs), ctx, userID, shortIDs)
+}
+
 // Get mocks base method.
 func (m *MockStorage) Get(ctx context.Context, shortID string) (string, error) {
 	m.ctrl.T.Helper()
@@ -68,6 +82,21 @@ func (m *MockStorage) Get(ctx context.Context, shortID string) (string, error) {
 func (mr *MockStorageMockRecorder) Get(ctx, shortID any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Get", reflect.TypeOf((*MockStorage)(nil).Get), ctx, shortID)
+}
+
+// GetUserURLs mocks base method.
+func (m *MockStorage) GetUserURLs(ctx context.Context, userID string) ([]storage.URLRecord, error) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetUserURLs", ctx, userID)
+	ret0, _ := ret[0].([]storage.URLRecord)
+	ret1, _ := ret[1].(error)
+	return ret0, ret1
+}
+
+// GetUserURLs indicates an expected call of GetUserURLs.
+func (mr *MockStorageMockRecorder) GetUserURLs(ctx, userID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetUserURLs", reflect.TypeOf((*MockStorage)(nil).GetUserURLs), ctx, userID)
 }
 
 // Ping mocks base method.
