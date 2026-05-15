@@ -71,8 +71,10 @@ func Load() (*Config, error) {
 	return cfg, nil
 }
 
+// errorWriter подавляет вывод ошибок парсинга флагов
 type errorWriter struct{}
 
+// Write подавляет вывод в stderr
 func (e *errorWriter) Write(p []byte) (n int, err error) {
 	return len(p), nil
 }

@@ -88,3 +88,13 @@ func (s *MemoryStorage) Ping() error {
 func (s *MemoryStorage) GetUserURLs(ctx context.Context, userID string) ([]URLRecord, error) {
 	return nil, nil
 }
+
+// DeleteUserURLs помечает URLs как удалённые (память не поддерживает userID, просто удаляет)
+func (s *MemoryStorage) DeleteUserURLs(ctx context.Context, userID string, shortIDs []string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, id := range shortIDs {
+		delete(s.storage, id)
+	}
+	return nil
+}

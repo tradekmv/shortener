@@ -16,11 +16,13 @@ const (
 	maxAttempts = 10
 )
 
+// Ошибки сервиса
 var (
 	ErrMaxRetriesExceeded = errors.New("не удалось сгенерировать уникальный ID после максимального количества попыток")
 	ErrURLAlreadyExists   = errors.New("URL уже существует")
 	ErrAlreadyExists      = errors.New("короткий ID уже существует")
 	ErrNotFound           = errors.New("короткая ссылка не найдена")
+	ErrDeletedGone        = errors.New("URL удалён")
 )
 
 // PostgresStorageGetter интерфейс для хранилищ с поддержкой поиска по original_url
@@ -33,10 +35,12 @@ type StorageWithUserID interface {
 	SaveWithUserID(ctx context.Context, shortID, originalURL, userID string) error
 }
 
+// Service предоставляет бизнес-логику для работы с URL-ссылками
 type Service struct {
 	storage storage.Storage
 }
 
+// NewService создает новый экземпляр Service
 func NewService(storage storage.Storage) *Service {
 	return &Service{storage: storage}
 }
@@ -56,7 +60,14 @@ func (s *Service) GetStore() storage.Storage {
 
 // Get возвращает оригинальный URL по shortID
 func (s *Service) Get(ctx context.Context, shortID string) (string, error) {
-	return s.storage.Get(ctx, shortID)
+	url, err := s.storage.Get(ctx, shortID)
+	if err != nil {
+		if errors.Is(err, storage.ErrDeletedGone) {
+			return "", ErrDeletedGone
+		}
+		return "", err
+	}
+	return url, nil
 }
 
 // Save saves the original URL and returns the short ID
@@ -120,6 +131,11 @@ func (s *Service) GetUserURLs(ctx context.Context, userID string) ([]storage.URL
 	return s.storage.GetUserURLs(ctx, userID)
 }
 
+// DeleteUserURLs marks URLs as deleted for the given user (async operation)
+func (s *Service) DeleteUserURLs(ctx context.Context, userID string, shortIDs []string) error {
+	return s.storage.DeleteUserURLs(ctx, userID, shortIDs)
+}
+
 // SaveBatch saves multiple URLs in one operation
 func (s *Service) SaveBatch(ctx context.Context, urls []storage.URLRecord) ([]storage.URLRecord, error) {
 	// Generate short IDs for all URLs first (to maintain correlation with correlation_id)
@@ -151,6 +167,7 @@ func generateID(n int) (string, error) {
 	return string(b), nil
 }
 
+// IsURL проверяет, является ли строка валидным URL (http:// или https://)
 func IsURL(str string) bool {
 	return strings.HasPrefix(str, "http://") || strings.HasPrefix(str, "https://")
 }
