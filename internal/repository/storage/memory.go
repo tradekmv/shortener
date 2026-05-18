@@ -30,6 +30,11 @@ func (s *MemoryStorage) Save(ctx context.Context, shortID, originalURL string) e
 	return nil
 }
 
+// SaveWithUserID сохраняет URL с привязкой к userID (для MemoryStorage - просто Save)
+func (s *MemoryStorage) SaveWithUserID(ctx context.Context, shortID, originalURL, userID string) error {
+	return s.Save(ctx, shortID, originalURL)
+}
+
 // Get возвращает originalURL по shortID
 func (s *MemoryStorage) Get(ctx context.Context, shortID string) (string, error) {
 	s.mu.RLock()
@@ -40,6 +45,19 @@ func (s *MemoryStorage) Get(ctx context.Context, shortID string) (string, error)
 		return "", ErrNotFound
 	}
 	return url, nil
+}
+
+// GetByOriginalURL returns shortURL by originalURL (stub for memory storage)
+func (s *MemoryStorage) GetByOriginalURL(originalURL string) (string, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	for shortURL, url := range s.storage {
+		if url == originalURL {
+			return shortURL, true
+		}
+	}
+	return "", false
 }
 
 // SaveBatch saves multiple URLs in one operation for memory storage

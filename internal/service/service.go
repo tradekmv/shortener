@@ -25,16 +25,6 @@ var (
 	ErrDeletedGone        = errors.New("URL удалён")
 )
 
-// PostgresStorageGetter интерфейс для хранилищ с поддержкой поиска по original_url
-type PostgresStorageGetter interface {
-	GetByOriginalURL(originalURL string) (string, bool)
-}
-
-// StorageWithUserID интерфейс для хранилищ с поддержкой user_id
-type StorageWithUserID interface {
-	SaveWithUserID(ctx context.Context, shortID, originalURL, userID string) error
-}
-
 // Service предоставляет бизнес-логику для работы с URL-ссылками
 type Service struct {
 	storage storage.Storage
@@ -84,12 +74,7 @@ func (s *Service) SaveWithUserID(ctx context.Context, originalURL, userID string
 			return "", err
 		}
 
-		// Проверяем, поддерживает ли storage сохранение с userID
-		if saver, ok := s.storage.(StorageWithUserID); ok {
-			err = saver.SaveWithUserID(ctx, id, originalURL, userID)
-		} else {
-			err = s.storage.Save(ctx, id, originalURL)
-		}
+		err = s.storage.SaveWithUserID(ctx, id, originalURL, userID)
 
 		if err == nil {
 			return id, nil
@@ -100,10 +85,8 @@ func (s *Service) SaveWithUserID(ctx context.Context, originalURL, userID string
 		// Если URL уже существует — возвращаем сразу (не retry)
 		if errors.Is(err, storage.ErrURLAlreadyExists) {
 			// Пытаемся получить существующий shortURL по originalURL
-			if getter, ok := s.storage.(PostgresStorageGetter); ok {
-				if existingID, found := getter.GetByOriginalURL(originalURL); found {
-					return existingID, ErrURLAlreadyExists
-				}
+			if existingID, found := s.storage.GetByOriginalURL(originalURL); found {
+				return existingID, ErrURLAlreadyExists
 			}
 			return "", ErrURLAlreadyExists
 		}

@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 )
@@ -26,14 +27,26 @@ var (
 	initKeyErr error
 )
 
-// initSecret инициализирует секретный ключ один раз
+// initSecret инициализирует секретный ключ из переменной окружения
 func initSecret() {
-	secretKey = []byte("your-secret-key-change-in-production")
+	key := os.Getenv("AUTH_SECRET_KEY")
+	if key == "" {
+		initKeyErr = errors.New("AUTH_SECRET_KEY environment variable is not set")
+		return
+	}
+	if len(key) < 32 {
+		initKeyErr = errors.New("AUTH_SECRET_KEY must be at least 32 characters")
+		return
+	}
+	secretKey = []byte(key)
 }
 
 // getHMAC возвращает HMAC-SHA256 подпись для данных
 func getHMAC(data string) string {
 	initOnce.Do(initSecret)
+	if secretKey == nil {
+		return ""
+	}
 
 	h := hmac.New(sha256.New, secretKey)
 	h.Write([]byte(data))
@@ -50,7 +63,7 @@ func generateUserID() (string, error) {
 }
 
 // SignCookie создаёт подписанную куку с user_id
-func SignCookie(w http.ResponseWriter, r *http.Request, userID string) error {
+func SignCookie(w http.ResponseWriter, userID string) error {
 	if userID == "" {
 		return errors.New("userID не может быть пустым")
 	}
@@ -58,13 +71,16 @@ func SignCookie(w http.ResponseWriter, r *http.Request, userID string) error {
 	signature := getHMAC(userID)
 	value := userID + separator + signature
 
+	// Secure: true только в production (когда RUN_ENV=production)
+	isProduction := os.Getenv("RUN_ENV") == "production"
+
 	http.SetCookie(w, &http.Cookie{
 		Name:     cookieName,
 		Value:    value,
 		MaxAge:   cookieMaxAge,
 		Path:     "/",
 		HttpOnly: true,
-		Secure:   false, // для локальной разработки
+		Secure:   isProduction,
 		SameSite: http.SameSiteLaxMode,
 	})
 
@@ -114,7 +130,7 @@ func CreateUserIDIfNeeded(w http.ResponseWriter, r *http.Request) (string, error
 	}
 
 	// Устанавливаем куку
-	if err := SignCookie(w, r, userID); err != nil {
+	if err := SignCookie(w, userID); err != nil {
 		return "", err
 	}
 

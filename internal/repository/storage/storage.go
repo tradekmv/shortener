@@ -33,7 +33,11 @@ type URLRecord struct {
 // Storage интерфейс хранилища
 type Storage interface {
 	Save(ctx context.Context, shortID, originalURL string) error
+	// SaveWithUserID сохраняет URL с привязкой к userID
+	SaveWithUserID(ctx context.Context, shortID, originalURL, userID string) error
 	Get(ctx context.Context, shortID string) (string, error)
+	// GetByOriginalURL возвращает shortURL по originalURL
+	GetByOriginalURL(originalURL string) (string, bool)
 	// SaveBatch saves multiple URLs in one operation.
 	SaveBatch(ctx context.Context, urls []URLRecord) ([]URLRecord, error)
 	// GetUserURLs возвращает все URLs для указанного userID
@@ -130,6 +134,11 @@ func (s *Shortener) Save(ctx context.Context, shortID, originalURL string) error
 	return nil
 }
 
+// SaveWithUserID сохраняет URL с привязкой к userID (для файлового storage - просто Save)
+func (s *Shortener) SaveWithUserID(ctx context.Context, shortID, originalURL, userID string) error {
+	return s.Save(ctx, shortID, originalURL)
+}
+
 // Get возвращает оригинальный URL по shortID
 func (s *Shortener) Get(ctx context.Context, shortID string) (string, error) {
 	s.mu.RLock()
@@ -139,6 +148,18 @@ func (s *Shortener) Get(ctx context.Context, shortID string) (string, error) {
 		return "", ErrNotFound
 	}
 	return originalURL, nil
+}
+
+// GetByOriginalURL возвращает shortURL по originalURL (stub для файлового хранилища)
+func (s *Shortener) GetByOriginalURL(originalURL string) (string, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for shortURL, origURL := range s.storage {
+		if origURL == originalURL {
+			return shortURL, true
+		}
+	}
+	return "", false
 }
 
 // SaveBatch saves multiple URLs in one operation for file storage

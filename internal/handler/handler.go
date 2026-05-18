@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/rs/zerolog"
 	"github.com/tradekmv/shortener.git/internal/auth"
@@ -42,14 +44,83 @@ type ShortenerHandler struct {
 	service *service.Service
 	baseURL string
 	log     *zerolog.Logger
+
+	// Fan-in для асинхронного удаления с батчингом
+	deleteChan   chan deleteRequest
+	stopChan     chan struct{}
+	wg           sync.WaitGroup
+	batchMutex   sync.Mutex
+	batchPending map[string][]string // userID -> []shortIDs
+	batchTicker  *time.Ticker
+}
+
+// deleteRequest запрос на удаление URL
+type deleteRequest struct {
+	userID   string
+	shortIDs []string
 }
 
 // New создает новый экземпляр ShortenerHandler
 func New(service *service.Service, baseURL string, store storage.Storage, log *zerolog.Logger) *ShortenerHandler {
-	return &ShortenerHandler{
-		service: service,
-		baseURL: baseURL,
-		log:     log,
+	h := &ShortenerHandler{
+		service:      service,
+		baseURL:      baseURL,
+		log:          log,
+		deleteChan:   make(chan deleteRequest, 100),
+		stopChan:     make(chan struct{}),
+		batchPending: make(map[string][]string),
+		batchTicker:  time.NewTicker(100 * time.Millisecond), // батчим каждые 100ms
+	}
+
+	// Запускаем 3 воркера для обработки запросов на удаление батчами
+	for i := 0; i < 3; i++ {
+		h.wg.Add(1)
+		go h.deleteWorker(i)
+	}
+
+	return h
+}
+
+// deleteWorker обрабатывает запросы на удаление из общего канала батчами
+func (h *ShortenerHandler) deleteWorker(id int) {
+	defer h.wg.Done()
+	for {
+		select {
+		case <-h.stopChan:
+			// При shutdown - сбрасываем остатки
+			h.flushBatch()
+			return
+		case req := <-h.deleteChan:
+			// Добавляем в pending батч
+			h.batchMutex.Lock()
+			h.batchPending[req.userID] = append(h.batchPending[req.userID], req.shortIDs...)
+			h.batchMutex.Unlock()
+		case <-h.batchTicker.C:
+			// Таймер сработал - сбрасываем батч
+			h.flushBatch()
+		}
+	}
+}
+
+// flushBatch сбрасывает накопленные запросы на удаление
+func (h *ShortenerHandler) flushBatch() {
+	h.batchMutex.Lock()
+	if len(h.batchPending) == 0 {
+		h.batchMutex.Unlock()
+		return
+	}
+	// Копируем и очищаем
+	pending := h.batchPending
+	h.batchPending = make(map[string][]string)
+	h.batchMutex.Unlock()
+
+	ctx := context.Background()
+	for userID, shortIDs := range pending {
+		if err := h.service.DeleteUserURLs(ctx, userID, shortIDs); err != nil {
+			h.log.Printf("Ошибка батч-удаления URLs для userID %s: %v", userID, err)
+		} else {
+			h.log.Printf("Батч-удалено %d URLs для userID %s", len(shortIDs), userID)
+		}
 	}
 }
 
@@ -321,6 +392,13 @@ type UserURLResponse struct {
 	OriginalURL string `json:"original_url"`
 }
 
+// Close останавливает воркеры и освобождает ресурсы
+func (h *ShortenerHandler) Close() {
+	h.batchTicker.Stop()
+	close(h.stopChan)
+	h.wg.Wait()
+}
+
 // DeleteUserURLsHandler обрабатывает DELETE /api/user/urls запросы
 func (h *ShortenerHandler) DeleteUserURLsHandler(w http.ResponseWriter, r *http.Request) {
 	userID, err := auth.CreateUserIDIfNeeded(w, r)
@@ -347,13 +425,11 @@ func (h *ShortenerHandler) DeleteUserURLsHandler(w http.ResponseWriter, r *http.
 		return
 	}
 
-	// Асинхронное удаление — создаём отдельный контекст для горутины
-	go func() {
-		ctx := context.Background()
-		if err := h.service.DeleteUserURLs(ctx, userID, shortIDs); err != nil {
-			h.log.Printf("Ошибка удаления URLs: %v", err)
-		}
-	}()
+	// Fan-in: отправляем запрос в общий канал для обработки воркерами
+	h.deleteChan <- deleteRequest{
+		userID:   userID,
+		shortIDs: shortIDs,
+	}
 
 	w.WriteHeader(http.StatusAccepted)
 }
