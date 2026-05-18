@@ -75,6 +75,9 @@ func main() {
 
 	log.Println("Завершение работы сервера...")
 
+	// Закрываем воркеры handler
+	h.Close()
+
 	// Закрываем все ресурсы через registry
 	if err := reg.CloseAll(); err != nil {
 		log.Printf("Ошибка закрытия ресурсов: %v", err)

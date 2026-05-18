@@ -64,7 +64,7 @@ func (m *MockStorage) DeleteUserURLs(ctx context.Context, userID string, shortID
 }
 
 // DeleteUserURLs indicates an expected call of DeleteUserURLs.
-func (mr *MockStorageMockRecorder) DeleteUserURLs(ctx, userID any, shortIDs any) *gomock.Call {
+func (mr *MockStorageMockRecorder) DeleteUserURLs(ctx, userID, shortIDs any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "DeleteUserURLs", reflect.TypeOf((*MockStorage)(nil).DeleteUserURLs), ctx, userID, shortIDs)
 }
@@ -82,6 +82,21 @@ func (m *MockStorage) Get(ctx context.Context, shortID string) (string, error) {
 func (mr *MockStorageMockRecorder) Get(ctx, shortID any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "Get", reflect.TypeOf((*MockStorage)(nil).Get), ctx, shortID)
+}
+
+// GetByOriginalURL mocks base method.
+func (m *MockStorage) GetByOriginalURL(originalURL string) (string, bool) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "GetByOriginalURL", originalURL)
+	ret0, _ := ret[0].(string)
+	ret1, _ := ret[1].(bool)
+	return ret0, ret1
+}
+
+// GetByOriginalURL indicates an expected call of GetByOriginalURL.
+func (mr *MockStorageMockRecorder) GetByOriginalURL(originalURL any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "GetByOriginalURL", reflect.TypeOf((*MockStorage)(nil).GetByOriginalURL), originalURL)
 }
 
 // GetUserURLs mocks base method.
@@ -140,6 +155,20 @@ func (m *MockStorage) SaveBatch(ctx context.Context, urls []storage.URLRecord) (
 func (mr *MockStorageMockRecorder) SaveBatch(ctx, urls any) *gomock.Call {
 	mr.mock.ctrl.T.Helper()
 	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SaveBatch", reflect.TypeOf((*MockStorage)(nil).SaveBatch), ctx, urls)
+}
+
+// SaveWithUserID mocks base method.
+func (m *MockStorage) SaveWithUserID(ctx context.Context, shortID, originalURL, userID string) error {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "SaveWithUserID", ctx, shortID, originalURL, userID)
+	ret0, _ := ret[0].(error)
+	return ret0
+}
+
+// SaveWithUserID indicates an expected call of SaveWithUserID.
+func (mr *MockStorageMockRecorder) SaveWithUserID(ctx, shortID, originalURL, userID any) *gomock.Call {
+	mr.mock.ctrl.T.Helper()
+	return mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "SaveWithUserID", reflect.TypeOf((*MockStorage)(nil).SaveWithUserID), ctx, shortID, originalURL, userID)
 }
 
 // MockPinger is a mock of Pinger interface.
