@@ -1,5 +1,6 @@
 //go:generate mockgen -source=storage.go -destination=mock/mock.go
 
+// Пакет storage предоставляет интерфейсы и реализации хранилища для URL-ссылок
 package storage
 
 import (
@@ -13,24 +14,36 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
+// Ошибки хранилища
 var (
 	ErrAlreadyExists    = errors.New("короткая ссылка уже существует")
 	ErrURLAlreadyExists = errors.New("URL уже существует")
 	ErrNotFound         = errors.New("короткая ссылка не найдена")
+	ErrDeletedGone      = errors.New("URL удалён")
 )
 
+// URLRecord представляет запись сокращённой ссылки
 type URLRecord struct {
 	UUID        string `json:"uuid"`
 	ShortURL    string `json:"short_url"`
 	OriginalURL string `json:"original_url"`
+	IsDeleted   bool   `json:"is_deleted,omitempty"`
 }
 
 // Storage интерфейс хранилища
 type Storage interface {
 	Save(ctx context.Context, shortID, originalURL string) error
+	// SaveWithUserID сохраняет URL с привязкой к userID
+	SaveWithUserID(ctx context.Context, shortID, originalURL, userID string) error
 	Get(ctx context.Context, shortID string) (string, error)
+	// GetByOriginalURL возвращает shortURL по originalURL
+	GetByOriginalURL(originalURL string) (string, bool)
 	// SaveBatch saves multiple URLs in one operation.
 	SaveBatch(ctx context.Context, urls []URLRecord) ([]URLRecord, error)
+	// GetUserURLs возвращает все URLs для указанного userID
+	GetUserURLs(ctx context.Context, userID string) ([]URLRecord, error)
+	// DeleteUserURLs помечает URL как удалённые (только для владельца)
+	DeleteUserURLs(ctx context.Context, userID string, shortIDs []string) error
 	Close() error
 	Ping() error
 }
@@ -40,12 +53,14 @@ type Pinger interface {
 	Ping() error
 }
 
+// Shortener реализует файловый storage для хранения URL
 type Shortener struct {
 	mu       sync.RWMutex
 	storage  map[string]string
 	filePath string
 }
 
+// New создает новый экземпляр Shortener с файловым хранилищем
 func New(filePath string) (*Shortener, error) {
 	s := &Shortener{
 		storage:  make(map[string]string),
@@ -103,6 +118,7 @@ func (s *Shortener) saveToFile() error {
 	return nil
 }
 
+// Save сохраняет короткий ID и оригинальный URL
 func (s *Shortener) Save(ctx context.Context, shortID, originalURL string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -118,6 +134,12 @@ func (s *Shortener) Save(ctx context.Context, shortID, originalURL string) error
 	return nil
 }
 
+// SaveWithUserID сохраняет URL с привязкой к userID (для файлового storage - просто Save)
+func (s *Shortener) SaveWithUserID(ctx context.Context, shortID, originalURL, userID string) error {
+	return s.Save(ctx, shortID, originalURL)
+}
+
+// Get возвращает оригинальный URL по shortID
 func (s *Shortener) Get(ctx context.Context, shortID string) (string, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -126,6 +148,18 @@ func (s *Shortener) Get(ctx context.Context, shortID string) (string, error) {
 		return "", ErrNotFound
 	}
 	return originalURL, nil
+}
+
+// GetByOriginalURL возвращает shortURL по originalURL (stub для файлового хранилища)
+func (s *Shortener) GetByOriginalURL(originalURL string) (string, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for shortURL, origURL := range s.storage {
+		if origURL == originalURL {
+			return shortURL, true
+		}
+	}
+	return "", false
 }
 
 // SaveBatch saves multiple URLs in one operation for file storage
@@ -165,4 +199,21 @@ func (s *Shortener) Close() error {
 // Ping проверяет доступность хранилища
 func (s *Shortener) Ping() error {
 	return nil
+}
+
+// GetUserURLs возвращает все URLs для указанного userID (файловое хранилище не поддерживает множественных пользователей)
+func (s *Shortener) GetUserURLs(ctx context.Context, userID string) ([]URLRecord, error) {
+	return nil, nil
+}
+
+// DeleteUserURLs помечает URLs как удалённые (файловое хранилище не поддерживает userID, просто помечает)
+func (s *Shortener) DeleteUserURLs(ctx context.Context, userID string, shortIDs []string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// Для файлового хранилища без userID просто удаляем записи
+	// В реальной реализации здесь была бы логика проверки owner
+	for _, id := range shortIDs {
+		delete(s.storage, id)
+	}
+	return s.saveToFile()
 }

@@ -30,6 +30,11 @@ func (s *MemoryStorage) Save(ctx context.Context, shortID, originalURL string) e
 	return nil
 }
 
+// SaveWithUserID сохраняет URL с привязкой к userID (для MemoryStorage - просто Save)
+func (s *MemoryStorage) SaveWithUserID(ctx context.Context, shortID, originalURL, userID string) error {
+	return s.Save(ctx, shortID, originalURL)
+}
+
 // Get возвращает originalURL по shortID
 func (s *MemoryStorage) Get(ctx context.Context, shortID string) (string, error) {
 	s.mu.RLock()
@@ -40,6 +45,19 @@ func (s *MemoryStorage) Get(ctx context.Context, shortID string) (string, error)
 		return "", ErrNotFound
 	}
 	return url, nil
+}
+
+// GetByOriginalURL returns shortURL by originalURL (stub for memory storage)
+func (s *MemoryStorage) GetByOriginalURL(originalURL string) (string, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+
+	for shortURL, url := range s.storage {
+		if url == originalURL {
+			return shortURL, true
+		}
+	}
+	return "", false
 }
 
 // SaveBatch saves multiple URLs in one operation for memory storage
@@ -81,5 +99,20 @@ func (s *MemoryStorage) Close() error {
 
 // Ping проверяет доступность хранилища
 func (s *MemoryStorage) Ping() error {
+	return nil
+}
+
+// GetUserURLs возвращает все URLs для указанного userID (память не поддерживает множественных пользователей)
+func (s *MemoryStorage) GetUserURLs(ctx context.Context, userID string) ([]URLRecord, error) {
+	return nil, nil
+}
+
+// DeleteUserURLs помечает URLs как удалённые (память не поддерживает userID, просто удаляет)
+func (s *MemoryStorage) DeleteUserURLs(ctx context.Context, userID string, shortIDs []string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for _, id := range shortIDs {
+		delete(s.storage, id)
+	}
 	return nil
 }

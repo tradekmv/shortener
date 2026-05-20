@@ -47,6 +47,8 @@ func main() {
 	r.Post("/", h.PostHandler)
 	r.Post("/api/shorten", h.APIShortenHandler)
 	r.Post("/api/shorten/batch", h.APIBatchShortenHandler)
+	r.Get("/api/user/urls", h.GetUserURLsHandler)
+	r.Delete("/api/user/urls", h.DeleteUserURLsHandler)
 	r.Get("/{id}", h.GetHandler)
 
 	addr := cfg.ServerAddress
@@ -72,6 +74,9 @@ func main() {
 	<-quit
 
 	log.Println("Завершение работы сервера...")
+
+	// Закрываем воркеры handler
+	h.Close()
 
 	// Закрываем все ресурсы через registry
 	if err := reg.CloseAll(); err != nil {

@@ -1,22 +1,28 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/rs/zerolog"
+	"github.com/tradekmv/shortener.git/internal/auth"
 	"github.com/tradekmv/shortener.git/internal/repository/storage"
 	"github.com/tradekmv/shortener.git/internal/service"
 )
 
+// ShortenerRequest представляет запрос на создание короткой ссылки
 type ShortenerRequest struct {
 	URL string `json:"url"`
 }
 
+// ShortenerResponse представляет ответ с короткой ссылкой
 type ShortenerResponse struct {
 	Result string `json:"result"`
 }
@@ -38,13 +44,83 @@ type ShortenerHandler struct {
 	service *service.Service
 	baseURL string
 	log     *zerolog.Logger
+
+	// Fan-in для асинхронного удаления с батчингом
+	deleteChan   chan deleteRequest
+	stopChan     chan struct{}
+	wg           sync.WaitGroup
+	batchMutex   sync.Mutex
+	batchPending map[string][]string // userID -> []shortIDs
+	batchTicker  *time.Ticker
 }
 
+// deleteRequest запрос на удаление URL
+type deleteRequest struct {
+	userID   string
+	shortIDs []string
+}
+
+// New создает новый экземпляр ShortenerHandler
 func New(service *service.Service, baseURL string, store storage.Storage, log *zerolog.Logger) *ShortenerHandler {
-	return &ShortenerHandler{
-		service: service,
-		baseURL: baseURL,
-		log:     log,
+	h := &ShortenerHandler{
+		service:      service,
+		baseURL:      baseURL,
+		log:          log,
+		deleteChan:   make(chan deleteRequest, 100),
+		stopChan:     make(chan struct{}),
+		batchPending: make(map[string][]string),
+		batchTicker:  time.NewTicker(100 * time.Millisecond), // батчим каждые 100ms
+	}
+
+	// Запускаем 3 воркера для обработки запросов на удаление батчами
+	for i := 0; i < 3; i++ {
+		h.wg.Add(1)
+		go h.deleteWorker(i)
+	}
+
+	return h
+}
+
+// deleteWorker обрабатывает запросы на удаление из общего канала батчами
+func (h *ShortenerHandler) deleteWorker(id int) {
+	defer h.wg.Done()
+	for {
+		select {
+		case <-h.stopChan:
+			// При shutdown - сбрасываем остатки
+			h.flushBatch()
+			return
+		case req := <-h.deleteChan:
+			// Добавляем в pending батч
+			h.batchMutex.Lock()
+			h.batchPending[req.userID] = append(h.batchPending[req.userID], req.shortIDs...)
+			h.batchMutex.Unlock()
+		case <-h.batchTicker.C:
+			// Таймер сработал - сбрасываем батч
+			h.flushBatch()
+		}
+	}
+}
+
+// flushBatch сбрасывает накопленные запросы на удаление
+func (h *ShortenerHandler) flushBatch() {
+	h.batchMutex.Lock()
+	if len(h.batchPending) == 0 {
+		h.batchMutex.Unlock()
+		return
+	}
+	// Копируем и очищаем
+	pending := h.batchPending
+	h.batchPending = make(map[string][]string)
+	h.batchMutex.Unlock()
+
+	ctx := context.Background()
+	for userID, shortIDs := range pending {
+		if err := h.service.DeleteUserURLs(ctx, userID, shortIDs); err != nil {
+			h.log.Printf("Ошибка батч-удаления URLs для userID %s: %v", userID, err)
+		} else {
+			h.log.Printf("Батч-удалено %d URLs для userID %s", len(shortIDs), userID)
+		}
 	}
 }
 
@@ -60,6 +136,12 @@ func (h *ShortenerHandler) PingHandler(w http.ResponseWriter, r *http.Request) {
 
 // PostHandler обрабатывает POST запросы для создания короткой ссылки
 func (h *ShortenerHandler) PostHandler(w http.ResponseWriter, r *http.Request) {
+	// Создаём или получаем userID из cookie
+	userID, err := auth.CreateUserIDIfNeeded(w, r)
+	if err != nil {
+		h.log.Printf("Ошибка создания userID: %v", err)
+	}
+
 	body, err := io.ReadAll(r.Body)
 	if err != nil {
 		http.Error(w, "Не удалось прочитать тело запроса", http.StatusBadRequest)
@@ -77,7 +159,7 @@ func (h *ShortenerHandler) PostHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	shortID, err := h.service.Save(r.Context(), originalURL)
+	shortID, err := h.service.SaveWithUserID(r.Context(), originalURL, userID)
 	if err != nil {
 		if errors.Is(err, service.ErrURLAlreadyExists) {
 			// URL уже существует — возвращаем 409 Conflict с коротким URL
@@ -116,6 +198,10 @@ func (h *ShortenerHandler) GetHandler(w http.ResponseWriter, r *http.Request) {
 
 	originalURL, err := h.service.Get(r.Context(), shortID)
 	if err != nil {
+		if errors.Is(err, service.ErrDeletedGone) {
+			http.Error(w, "URL был удалён", http.StatusGone)
+			return
+		}
 		if errors.Is(err, service.ErrNotFound) {
 			http.Error(w, "URL не найден", http.StatusNotFound)
 			return
@@ -131,6 +217,15 @@ func (h *ShortenerHandler) GetHandler(w http.ResponseWriter, r *http.Request) {
 
 // APIShortenHandler обрабатывает POST запросы JSON API для создания короткой ссылки
 func (h *ShortenerHandler) APIShortenHandler(w http.ResponseWriter, r *http.Request) {
+	// Создаём или получаем userID из cookie
+	userID, err := auth.CreateUserIDIfNeeded(w, r)
+	if err != nil {
+		h.log.Printf("Ошибка создания userID: %v", err)
+		// Продолжаем без userID, кука уже должна быть установлена при CreateUserIDIfNeeded
+		// но если была ошибка, используем пустой userID
+		userID = ""
+	}
+
 	var req ShortenerRequest
 
 	dec := json.NewDecoder(r.Body)
@@ -144,7 +239,7 @@ func (h *ShortenerHandler) APIShortenHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	shortID, err := h.service.Save(r.Context(), req.URL)
+	shortID, err := h.service.SaveWithUserID(r.Context(), req.URL, userID)
 	if err != nil {
 		if errors.Is(err, service.ErrURLAlreadyExists) {
 			// URL уже существует — возвращаем 409 Conflict с коротким URL в JSON формате
@@ -234,4 +329,107 @@ func (h *ShortenerHandler) APIBatchShortenHandler(w http.ResponseWriter, r *http
 		h.log.Printf("Ошибка кодирования JSON: %v", err)
 		return
 	}
+}
+
+// GetUserURLsHandler обрабатывает GET /api/user/urls запросы
+func (h *ShortenerHandler) GetUserURLsHandler(w http.ResponseWriter, r *http.Request) {
+	// Пытаемся получить userID из существующей куки или создаём новую
+	userID, err := auth.CreateUserIDIfNeeded(w, r)
+	if err != nil {
+		h.log.Printf("Ошибка создания userID: %v", err)
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+
+	if userID == "" {
+		// Кука содержит пустой user_id
+		http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+		return
+	}
+
+	// Получаем URLs пользователя
+	urls, err := h.service.GetUserURLs(r.Context(), userID)
+	if err != nil {
+		h.log.Printf("Ошибка получения URLs пользователя: %v", err)
+		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
+		return
+	}
+
+	if len(urls) == 0 {
+		// Нет URLs для пользователя
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	// Формируем ответ
+	response := make([]UserURLResponse, 0, len(urls))
+	for _, rec := range urls {
+		shortURL, err := url.JoinPath(h.baseURL, rec.ShortURL)
+		if err != nil {
+			h.log.Printf("Ошибка построения URL: %v", err)
+			http.Error(w, "Не удалось построить короткий URL", http.StatusInternalServerError)
+			return
+		}
+		response = append(response, UserURLResponse{
+			ShortURL:    shortURL,
+			OriginalURL: rec.OriginalURL,
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+
+	enc := json.NewEncoder(w)
+	if err := enc.Encode(response); err != nil {
+		h.log.Printf("Ошибка кодирования JSON: %v", err)
+		return
+	}
+}
+
+// UserURLResponse структура ответа для /api/user/urls
+type UserURLResponse struct {
+	ShortURL    string `json:"short_url"`
+	OriginalURL string `json:"original_url"`
+}
+
+// Close останавливает воркеры и освобождает ресурсы
+func (h *ShortenerHandler) Close() {
+	h.batchTicker.Stop()
+	close(h.stopChan)
+	h.wg.Wait()
+}
+
+// DeleteUserURLsHandler обрабатывает DELETE /api/user/urls запросы
+func (h *ShortenerHandler) DeleteUserURLsHandler(w http.ResponseWriter, r *http.Request) {
+	userID, err := auth.CreateUserIDIfNeeded(w, r)
+	if err != nil {
+		h.log.Printf("Ошибка создания userID: %v", err)
+		http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+		return
+	}
+
+	if userID == "" {
+		http.Error(w, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
+		return
+	}
+
+	var shortIDs []string
+	dec := json.NewDecoder(r.Body)
+	if err := dec.Decode(&shortIDs); err != nil {
+		http.Error(w, "Неверный формат JSON", http.StatusBadRequest)
+		return
+	}
+
+	if len(shortIDs) == 0 {
+		http.Error(w, "Пустой список ID", http.StatusBadRequest)
+		return
+	}
+
+	// Fan-in: отправляем запрос в общий канал для обработки воркерами
+	h.deleteChan <- deleteRequest{
+		userID:   userID,
+		shortIDs: shortIDs,
+	}
+
+	w.WriteHeader(http.StatusAccepted)
 }

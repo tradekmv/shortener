@@ -4,8 +4,8 @@ import (
 	"context"
 	"testing"
 
-	mock_storage "github.com/tradekmv/shortener.git/internal/repository/mock"
 	"github.com/tradekmv/shortener.git/internal/repository/storage"
+	mock_storage "github.com/tradekmv/shortener.git/internal/repository/storage/mock"
 	"go.uber.org/mock/gomock"
 )
 
@@ -45,7 +45,7 @@ func TestSave_Success(t *testing.T) {
 	svc := NewService(mockRepo)
 
 	mockRepo.EXPECT().
-		Save(gomock.Any(), gomock.Any(), "https://example.com").
+		SaveWithUserID(gomock.Any(), gomock.Any(), "https://example.com", gomock.Any()).
 		Return(nil)
 
 	id, err := svc.Save(context.Background(), "https://example.com")
@@ -68,7 +68,7 @@ func TestSave_AnyInput(t *testing.T) {
 	svc := NewService(mockRepo)
 
 	mockRepo.EXPECT().
-		Save(gomock.Any(), gomock.Any(), "invalid-url").
+		SaveWithUserID(gomock.Any(), gomock.Any(), "invalid-url", gomock.Any()).
 		Return(nil)
 
 	id, err := svc.Save(context.Background(), "invalid-url")
@@ -125,7 +125,7 @@ func TestSave_GeneratesUniqueIDs(t *testing.T) {
 	svc := NewService(mockRepo)
 
 	mockRepo.EXPECT().
-		Save(gomock.Any(), gomock.Any(), gomock.Any()).
+		SaveWithUserID(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
 		Return(nil).
 		Times(100)
 

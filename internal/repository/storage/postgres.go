@@ -41,29 +41,80 @@ func NewPostgres(dsn string) (*PostgresStorage, error) {
 
 // migrate создаёт таблицы и индексы
 func (s *PostgresStorage) migrate() error {
-	query := `
+	// Создаём таблицу
+	createTable := `
 	CREATE TABLE IF NOT EXISTS urls (
 		id SERIAL PRIMARY KEY,
 		short_url VARCHAR(32) NOT NULL UNIQUE,
 		original_url TEXT NOT NULL,
 		created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 	);
-	CREATE INDEX IF NOT EXISTS idx_short_url ON urls(short_url);
-	CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_original_url ON urls(original_url);
 	`
-	_, err := s.db.Exec(query)
+	_, err := s.db.Exec(createTable)
 	if err != nil {
-		log.Error().Err(err).Msg("Ошибка миграции БД")
+		log.Error().Err(err).Msg("Ошибка создания таблицы БД")
 		return err
 	}
+
+	// Добавляем колонку user_id если её нет
+	addUserIDColumn := `
+	DO $$
+	BEGIN
+		IF NOT EXISTS (
+			SELECT 1 FROM information_schema.columns 
+			WHERE table_name = 'urls' AND column_name = 'user_id'
+		) THEN
+			ALTER TABLE urls ADD COLUMN user_id VARCHAR(64) NOT NULL DEFAULT '';
+		END IF;
+	END $$;
+	`
+	_, err = s.db.Exec(addUserIDColumn)
+	if err != nil {
+		log.Warn().Err(err).Msg("Ошибка добавления колонки user_id (может уже существовать)")
+		// Не возвращаем ошибку, т.к. колонка может уже существовать
+	}
+
+	// Добавляем колонку is_deleted если её нет
+	addDeletedColumn := `
+	DO $$
+	BEGIN
+		IF NOT EXISTS (
+			SELECT 1 FROM information_schema.columns 
+			WHERE table_name = 'urls' AND column_name = 'is_deleted'
+		) THEN
+			ALTER TABLE urls ADD COLUMN is_deleted BOOLEAN NOT NULL DEFAULT FALSE;
+		END IF;
+	END $$;
+	`
+	_, err = s.db.Exec(addDeletedColumn)
+	if err != nil {
+		log.Warn().Err(err).Msg("Ошибка добавления колонки is_deleted (может уже существовать)")
+	}
+
+	// Создаём индексы
+	indexes := `
+	CREATE INDEX IF NOT EXISTS idx_short_url ON urls(short_url);
+	CREATE UNIQUE INDEX IF NOT EXISTS idx_unique_original_url ON urls(original_url);
+	CREATE INDEX IF NOT EXISTS idx_user_id ON urls(user_id);
+	`
+	_, err = s.db.Exec(indexes)
+	if err != nil {
+		log.Warn().Err(err).Msg("Ошибка создания индексов")
+	}
+
 	return nil
 }
 
-// Save сохраняет пару shortURL → originalURL
+// Save сохраняет пару shortURL → originalURL с user_id
 // Возвращает ErrURLAlreadyExists если original_url уже существует в базе
 func (s *PostgresStorage) Save(ctx context.Context, shortID, originalURL string) error {
-	query := `INSERT INTO urls (short_url, original_url) VALUES ($1, $2)`
-	_, err := s.db.Exec(query, shortID, originalURL)
+	return s.SaveWithUserID(ctx, shortID, originalURL, "")
+}
+
+// SaveWithUserID сохраняет пару shortURL → originalURL с указанным user_id
+func (s *PostgresStorage) SaveWithUserID(ctx context.Context, shortID, originalURL, userID string) error {
+	query := `INSERT INTO urls (short_url, original_url, user_id) VALUES ($1, $2, $3)`
+	_, err := s.db.ExecContext(ctx, query, shortID, originalURL, userID)
 	if err != nil {
 		// Проверяем, является ли ошибка нарушением уникального индекса (pq.Error используется с github.com/lib/pq)
 		var pqErr *pq.Error
@@ -81,13 +132,17 @@ func (s *PostgresStorage) Save(ctx context.Context, shortID, originalURL string)
 // Get возвращает originalURL по shortID
 func (s *PostgresStorage) Get(ctx context.Context, shortID string) (string, error) {
 	var originalURL string
-	err := s.db.QueryRow("SELECT original_url FROM urls WHERE short_url = $1", shortID).Scan(&originalURL)
+	var isDeleted bool
+	err := s.db.QueryRow("SELECT original_url, is_deleted FROM urls WHERE short_url = $1", shortID).Scan(&originalURL, &isDeleted)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return "", ErrNotFound
 		}
 		log.Error().Err(err).Msg("Ошибка чтения из БД")
 		return "", err
+	}
+	if isDeleted {
+		return "", ErrDeletedGone
 	}
 	return originalURL, nil
 }
@@ -144,4 +199,47 @@ func (s *PostgresStorage) Close() error {
 // Ping проверяет соединение с БД
 func (s *PostgresStorage) Ping() error {
 	return s.db.Ping()
+}
+
+// GetUserURLs возвращает все URLs для указанного userID
+func (s *PostgresStorage) GetUserURLs(ctx context.Context, userID string) ([]URLRecord, error) {
+	query := `SELECT short_url, original_url FROM urls WHERE user_id = $1 ORDER BY created_at DESC`
+	rows, err := s.db.QueryContext(ctx, query, userID)
+	if err != nil {
+		log.Error().Err(err).Msg("Ошибка получения URLs пользователя")
+		return nil, err
+	}
+	defer rows.Close()
+
+	var results []URLRecord
+	for rows.Next() {
+		var rec URLRecord
+		if err := rows.Scan(&rec.ShortURL, &rec.OriginalURL); err != nil {
+			log.Error().Err(err).Msg("Ошибка сканирования строки")
+			return nil, err
+		}
+		results = append(results, rec)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+
+	return results, nil
+}
+
+// DeleteUserURLs помечает URLs как удалённые для указанного пользователя (async, batch update)
+func (s *PostgresStorage) DeleteUserURLs(ctx context.Context, userID string, shortIDs []string) error {
+	if len(shortIDs) == 0 {
+		return nil
+	}
+
+	// Используем множественное обновление с ANY для эффективности
+	query := `UPDATE urls SET is_deleted = TRUE WHERE short_url = ANY($1) AND user_id = $2`
+	_, err := s.db.ExecContext(ctx, query, shortIDs, userID)
+	if err != nil {
+		log.Error().Err(err).Msg("Ошибка удаления URLs")
+		return fmt.Errorf("ошибка удаления URLs: %w", err)
+	}
+	return nil
 }

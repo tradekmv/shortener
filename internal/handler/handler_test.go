@@ -10,8 +10,8 @@ import (
 	"testing"
 
 	"github.com/rs/zerolog"
-	"github.com/tradekmv/shortener.git/internal/repository/mock"
 	"github.com/tradekmv/shortener.git/internal/repository/storage"
+	"github.com/tradekmv/shortener.git/internal/repository/storage/mock"
 	"github.com/tradekmv/shortener.git/internal/service"
 	"go.uber.org/mock/gomock"
 )
@@ -25,7 +25,7 @@ func TestPostHandler_Success(t *testing.T) {
 	defer ctrl.Finish()
 
 	mockStorage := mock_storage.NewMockStorage(ctrl)
-	mockStorage.EXPECT().Save(gomock.Any(), gomock.Any(), "https://example.com").Return(nil)
+	mockStorage.EXPECT().SaveWithUserID(gomock.Any(), gomock.Any(), "https://example.com", gomock.Any()).Return(nil)
 
 	svc := service.NewService(mockStorage)
 	h := New(svc, "http://localhost:8080", nil, &testLogger)
@@ -119,7 +119,7 @@ func TestAPIShortenHandler_Success(t *testing.T) {
 	defer ctrl.Finish()
 
 	mockStorage := mock_storage.NewMockStorage(ctrl)
-	mockStorage.EXPECT().Save(gomock.Any(), gomock.Any(), "https://example.com").Return(nil)
+	mockStorage.EXPECT().SaveWithUserID(gomock.Any(), gomock.Any(), "https://example.com", gomock.Any()).Return(nil)
 
 	svc := service.NewService(mockStorage)
 	h := New(svc, "http://localhost:8080", nil, &testLogger)
