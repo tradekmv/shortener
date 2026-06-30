@@ -28,7 +28,7 @@ func TestPostHandler_Success(t *testing.T) {
 	mockStorage.EXPECT().SaveWithUserID(gomock.Any(), gomock.Any(), "https://example.com", gomock.Any()).Return(nil)
 
 	svc := service.NewService(mockStorage)
-	h := New(svc, "http://localhost:8080", nil, &testLogger)
+	h := New(svc, "http://localhost:8080", nil, &testLogger, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader("https://example.com"))
 	w := httptest.NewRecorder()
@@ -51,7 +51,7 @@ func TestPostHandler_EmptyBody(t *testing.T) {
 
 	mockStorage := mock_storage.NewMockStorage(ctrl)
 	svc := service.NewService(mockStorage)
-	h := New(svc, "http://localhost:8080", nil, &testLogger)
+	h := New(svc, "http://localhost:8080", nil, &testLogger, nil)
 
 	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(""))
 	w := httptest.NewRecorder()
@@ -71,7 +71,7 @@ func TestGetHandler_Success(t *testing.T) {
 	mockStorage.EXPECT().Get(gomock.Any(), "abc123").Return("https://example.com", nil)
 
 	svc := service.NewService(mockStorage)
-	h := New(svc, "http://localhost:8080", nil, &testLogger)
+	h := New(svc, "http://localhost:8080", nil, &testLogger, nil)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/{id}", h.GetHandler)
@@ -99,7 +99,7 @@ func TestGetHandler_NotFound(t *testing.T) {
 	mockStorage.EXPECT().Get(gomock.Any(), "nonexistent").Return("", service.ErrNotFound)
 
 	svc := service.NewService(mockStorage)
-	h := New(svc, "http://localhost:8080", nil, &testLogger)
+	h := New(svc, "http://localhost:8080", nil, &testLogger, nil)
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("/{id}", h.GetHandler)
@@ -122,7 +122,7 @@ func TestAPIShortenHandler_Success(t *testing.T) {
 	mockStorage.EXPECT().SaveWithUserID(gomock.Any(), gomock.Any(), "https://example.com", gomock.Any()).Return(nil)
 
 	svc := service.NewService(mockStorage)
-	h := New(svc, "http://localhost:8080", nil, &testLogger)
+	h := New(svc, "http://localhost:8080", nil, &testLogger, nil)
 
 	body := `{"url":"https://example.com"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/shorten", strings.NewReader(body))
@@ -152,7 +152,7 @@ func TestAPIShortenHandler_InvalidJSON(t *testing.T) {
 
 	mockStorage := mock_storage.NewMockStorage(ctrl)
 	svc := service.NewService(mockStorage)
-	h := New(svc, "http://localhost:8080", nil, &testLogger)
+	h := New(svc, "http://localhost:8080", nil, &testLogger, nil)
 
 	body := `{invalid json}`
 	req := httptest.NewRequest(http.MethodPost, "/api/shorten", strings.NewReader(body))
@@ -172,7 +172,7 @@ func TestAPIShortenHandler_EmptyURL(t *testing.T) {
 
 	mockStorage := mock_storage.NewMockStorage(ctrl)
 	svc := service.NewService(mockStorage)
-	h := New(svc, "http://localhost:8080", nil, &testLogger)
+	h := New(svc, "http://localhost:8080", nil, &testLogger, nil)
 
 	body := `{"url":""}`
 	req := httptest.NewRequest(http.MethodPost, "/api/shorten", strings.NewReader(body))
@@ -188,7 +188,7 @@ func TestAPIShortenHandler_EmptyURL(t *testing.T) {
 
 func TestPingHandler_NoDatabase(t *testing.T) {
 	svc := service.NewService(nil)
-	h := New(svc, "http://localhost:8080", nil, &testLogger)
+	h := New(svc, "http://localhost:8080", nil, &testLogger, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/ping", nil)
 	w := httptest.NewRecorder()
@@ -208,7 +208,7 @@ func TestPingHandler_WithMockStorage(t *testing.T) {
 	mockStorage.EXPECT().Ping().Return(nil)
 
 	svc := service.NewService(mockStorage)
-	h := New(svc, "http://localhost:8080", mockStorage, &testLogger)
+	h := New(svc, "http://localhost:8080", mockStorage, &testLogger, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/ping", nil)
 	w := httptest.NewRecorder()
@@ -228,7 +228,7 @@ func TestPingHandler_StorageError(t *testing.T) {
 	mockStorage.EXPECT().Ping().Return(errors.New("connection refused"))
 
 	svc := service.NewService(mockStorage)
-	h := New(svc, "http://localhost:8080", mockStorage, &testLogger)
+	h := New(svc, "http://localhost:8080", mockStorage, &testLogger, nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/ping", nil)
 	w := httptest.NewRecorder()
@@ -246,7 +246,7 @@ func TestAPIBatchShortenHandler_Success(t *testing.T) {
 
 	mockStorage := mock_storage.NewMockStorage(ctrl)
 	svc := service.NewService(mockStorage)
-	h := New(svc, "http://localhost:8080", nil, &testLogger)
+	h := New(svc, "http://localhost:8080", nil, &testLogger, nil)
 
 	// Mock SaveBatch for batch save operation
 	mockStorage.EXPECT().SaveBatch(gomock.Any(), gomock.Any()).DoAndReturn(
@@ -296,7 +296,7 @@ func TestAPIBatchShortenHandler_InvalidJSON(t *testing.T) {
 
 	mockStorage := mock_storage.NewMockStorage(ctrl)
 	svc := service.NewService(mockStorage)
-	h := New(svc, "http://localhost:8080", nil, &testLogger)
+	h := New(svc, "http://localhost:8080", nil, &testLogger, nil)
 
 	body := `{invalid json}`
 	req := httptest.NewRequest(http.MethodPost, "/api/shorten/batch", strings.NewReader(body))
@@ -316,7 +316,7 @@ func TestAPIBatchShortenHandler_EmptyBatch(t *testing.T) {
 
 	mockStorage := mock_storage.NewMockStorage(ctrl)
 	svc := service.NewService(mockStorage)
-	h := New(svc, "http://localhost:8080", nil, &testLogger)
+	h := New(svc, "http://localhost:8080", nil, &testLogger, nil)
 
 	body := `[]`
 	req := httptest.NewRequest(http.MethodPost, "/api/shorten/batch", strings.NewReader(body))
@@ -336,7 +336,7 @@ func TestAPIBatchShortenHandler_EmptyURL(t *testing.T) {
 
 	mockStorage := mock_storage.NewMockStorage(ctrl)
 	svc := service.NewService(mockStorage)
-	h := New(svc, "http://localhost:8080", nil, &testLogger)
+	h := New(svc, "http://localhost:8080", nil, &testLogger, nil)
 
 	body := `[{"correlation_id": "abc123", "original_url": ""}]`
 	req := httptest.NewRequest(http.MethodPost, "/api/shorten/batch", strings.NewReader(body))
