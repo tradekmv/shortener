@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
+	"github.com/tradekmv/shortener.git/internal/audit"
 	"github.com/tradekmv/shortener.git/internal/auth"
 	"github.com/tradekmv/shortener.git/internal/repository/storage"
 	"github.com/tradekmv/shortener.git/internal/service"
@@ -41,9 +42,10 @@ type BatchResponseItem struct {
 
 // ShortenerHandler обрабатывает HTTP-запросы для сокращения URL
 type ShortenerHandler struct {
-	service *service.Service
-	baseURL string
-	log     *zerolog.Logger
+	service  *service.Service
+	baseURL  string
+	log      *zerolog.Logger
+	auditPub *audit.Publisher
 
 	// Fan-in для асинхронного удаления с батчингом
 	deleteChan   chan deleteRequest
@@ -61,11 +63,12 @@ type deleteRequest struct {
 }
 
 // New создает новый экземпляр ShortenerHandler
-func New(service *service.Service, baseURL string, store storage.Storage, log *zerolog.Logger) *ShortenerHandler {
+func New(service *service.Service, baseURL string, store storage.Storage, log *zerolog.Logger, auditPub *audit.Publisher) *ShortenerHandler {
 	h := &ShortenerHandler{
 		service:      service,
 		baseURL:      baseURL,
 		log:          log,
+		auditPub:     auditPub,
 		deleteChan:   make(chan deleteRequest, 100),
 		stopChan:     make(chan struct{}),
 		batchPending: make(map[string][]string),
@@ -180,6 +183,16 @@ func (h *ShortenerHandler) PostHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Аудит: событие shorten после успешного создания
+	if h.auditPub != nil {
+		h.auditPub.Publish(audit.Event{
+			Timestamp: time.Now().Unix(),
+			Action:    "shorten",
+			UserID:    userID,
+			URL:       originalURL,
+		})
+	}
+
 	w.Header().Set("Content-Type", "text/plain")
 	w.WriteHeader(http.StatusCreated)
 	_, err = w.Write([]byte(shortURL))
@@ -209,6 +222,19 @@ func (h *ShortenerHandler) GetHandler(w http.ResponseWriter, r *http.Request) {
 		h.log.Printf("Ошибка получения URL: %v", err)
 		http.Error(w, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return
+	}
+
+	// Получаем userID из куки для аудита
+	userID, _ := auth.GetUserIDFromCookie(r)
+
+	// Аудит: событие follow после успешного получения URL
+	if h.auditPub != nil {
+		h.auditPub.Publish(audit.Event{
+			Timestamp: time.Now().Unix(),
+			Action:    "follow",
+			UserID:    userID,
+			URL:       originalURL,
+		})
 	}
 
 	w.Header().Set("Location", originalURL)
@@ -258,6 +284,16 @@ func (h *ShortenerHandler) APIShortenHandler(w http.ResponseWriter, r *http.Requ
 	if err != nil {
 		http.Error(w, "Не удалось построить короткий URL", http.StatusInternalServerError)
 		return
+	}
+
+	// Аудит: событие shorten после успешного создания
+	if h.auditPub != nil {
+		h.auditPub.Publish(audit.Event{
+			Timestamp: time.Now().Unix(),
+			Action:    "shorten",
+			UserID:    userID,
+			URL:       req.URL,
+		})
 	}
 
 	w.Header().Set("Content-Type", "application/json")

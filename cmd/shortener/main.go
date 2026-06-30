@@ -8,6 +8,7 @@ import (
 	"syscall"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/tradekmv/shortener.git/internal/audit"
 	"github.com/tradekmv/shortener.git/internal/config"
 	"github.com/tradekmv/shortener.git/internal/handler"
 	"github.com/tradekmv/shortener.git/internal/middleware"
@@ -40,8 +41,14 @@ func main() {
 	store := initStorage(cfg, log)
 	reg.Register(store)
 
+	// Инициализация аудита (паттерн Observer)
+	auditPub := initAudit(cfg, log)
+	if auditPub != nil {
+		reg.Register(auditPub)
+	}
+
 	svc := service.NewService(store)
-	h := handler.New(svc, cfg.BaseURL, store, log)
+	h := handler.New(svc, cfg.BaseURL, store, log, auditPub)
 
 	r.Get("/ping", h.PingHandler)
 	r.Post("/", h.PostHandler)
@@ -114,4 +121,36 @@ func initStorage(cfg *config.Config, log *logger.Logger) storage.Storage {
 	// 3. Память (fallback)
 	log.Println("Используем хранилище в памяти")
 	return storage.NewMemory()
+}
+
+// initAudit инициализирует систему аудита с наблюдателями (паттерн Observer)
+// Возвращает nil если аудит отключён
+func initAudit(cfg *config.Config, log *logger.Logger) *audit.Publisher {
+	// Если нет ни файла, ни URL — аудит отключён
+	if cfg.AuditFile == "" && cfg.AuditURL == "" {
+		log.Println("Аудит отключён")
+		return nil
+	}
+
+	publisher := audit.NewPublisher(log)
+
+	// Наблюдатель для файла
+	if cfg.AuditFile != "" {
+		fileObs, err := audit.NewFileObserver(cfg.AuditFile)
+		if err != nil {
+			log.Printf("Ошибка создания файлового наблюдателя аудита: %v", err)
+		} else {
+			publisher.Subscribe(fileObs)
+			log.Printf("Аудит в файл включён: %s", cfg.AuditFile)
+		}
+	}
+
+	// Наблюдатель для удалённого сервера
+	if cfg.AuditURL != "" {
+		remoteObs := audit.NewRemoteObserver(cfg.AuditURL)
+		publisher.Subscribe(remoteObs)
+		log.Printf("Аудит на удалённый сервер включён: %s", cfg.AuditURL)
+	}
+
+	return publisher
 }
