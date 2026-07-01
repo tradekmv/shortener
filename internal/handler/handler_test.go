@@ -11,7 +11,7 @@ import (
 
 	"github.com/rs/zerolog"
 	"github.com/tradekmv/shortener.git/internal/repository/storage"
-	"github.com/tradekmv/shortener.git/internal/repository/storage/mock"
+	mock_storage "github.com/tradekmv/shortener.git/internal/repository/storage/mock"
 	"github.com/tradekmv/shortener.git/internal/service"
 	"go.uber.org/mock/gomock"
 )
