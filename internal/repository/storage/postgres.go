@@ -169,7 +169,6 @@ func (s *PostgresStorage) SaveBatch(ctx context.Context, urls []URLRecord) ([]UR
 	}
 	defer tx.Rollback()
 
-	result := make([]URLRecord, 0, len(urls))
 	for _, rec := range urls {
 		_, err := tx.Exec(
 			`INSERT INTO urls (short_url, original_url) VALUES ($1, $2) ON CONFLICT (short_url) DO UPDATE SET short_url = EXCLUDED.short_url RETURNING id`,
@@ -179,16 +178,12 @@ func (s *PostgresStorage) SaveBatch(ctx context.Context, urls []URLRecord) ([]UR
 		if err != nil {
 			return nil, fmt.Errorf("ошибка вставки в БД: %w", err)
 		}
-		result = append(result, URLRecord{
-			ShortURL:    rec.ShortURL,
-			OriginalURL: rec.OriginalURL,
-		})
 	}
 
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("ошибка коммита транзакции: %w", err)
 	}
-	return result, nil
+	return urls, nil
 }
 
 // Close закрывает соединение с БД

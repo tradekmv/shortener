@@ -60,29 +60,26 @@ func (s *MemoryStorage) GetByOriginalURL(originalURL string) (string, bool) {
 	return "", false
 }
 
-// SaveBatch saves multiple URLs in one operation for memory storage
+// SaveBatch saves multiple URLs in one operation for memory storage.
+// Возвращает подмножество URLs, которые были добавлены (без дубликатов).
 func (s *MemoryStorage) SaveBatch(ctx context.Context, urls []URLRecord) ([]URLRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	result := make([]URLRecord, 0, len(urls))
+	n := 0
 	for _, rec := range urls {
 		if existingURL, ok := s.storage[rec.ShortURL]; ok {
 			if existingURL == rec.OriginalURL {
-				result = append(result, URLRecord{
-					ShortURL:    rec.ShortURL,
-					OriginalURL: rec.OriginalURL,
-				})
+				urls[n] = rec
+				n++
 			}
 			continue
 		}
 		s.storage[rec.ShortURL] = rec.OriginalURL
-		result = append(result, URLRecord{
-			ShortURL:    rec.ShortURL,
-			OriginalURL: rec.OriginalURL,
-		})
+		urls[n] = rec
+		n++
 	}
-	return result, nil
+	return urls[:n], nil
 }
 
 // Len возвращает количество записей

@@ -121,7 +121,6 @@ func (s *Service) DeleteUserURLs(ctx context.Context, userID string, shortIDs []
 
 // SaveBatch saves multiple URLs in one operation
 func (s *Service) SaveBatch(ctx context.Context, urls []storage.URLRecord) ([]storage.URLRecord, error) {
-	// Generate short IDs for all URLs first (to maintain correlation with correlation_id)
 	records := make([]storage.URLRecord, 0, len(urls))
 	for _, rec := range urls {
 		shortID, err := generateID(length)
@@ -133,19 +132,26 @@ func (s *Service) SaveBatch(ctx context.Context, urls []storage.URLRecord) ([]st
 			OriginalURL: rec.OriginalURL,
 		})
 	}
-
-	// Save all URLs in batch
 	return s.storage.SaveBatch(ctx, records)
+}
+
+// fastCharsetIndex быстро маппит случайный байт в индекс charset
+// через таблицу предвычислений, чтобы избежать деления
+var fastCharsetIndex [256]byte
+
+func init() {
+	for i := range fastCharsetIndex {
+		fastCharsetIndex[i] = byte(charset[i%len(charset)])
+	}
 }
 
 func generateID(n int) (string, error) {
 	b := make([]byte, n)
-	_, err := rand.Read(b)
-	if err != nil {
+	if _, err := rand.Read(b); err != nil {
 		return "", err
 	}
 	for i := range b {
-		b[i] = charset[int(b[i])%len(charset)]
+		b[i] = fastCharsetIndex[b[i]]
 	}
 	return string(b), nil
 }
