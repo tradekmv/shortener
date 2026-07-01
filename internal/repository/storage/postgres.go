@@ -11,12 +11,17 @@ import (
 )
 
 // ErrURLAlreadyExists - ошибка, возвращаемая при попытке сохранить уже существующий URL
-// PostgresStorage хранит данные в PostgreSQL
+
+// PostgresStorage — реализация хранилища Storage для PostgreSQL.
+// Использует уникальные индексы по short_url и original_url.
+// Безопасна для конкурентного использования.
 type PostgresStorage struct {
 	db *sql.DB
 }
 
-// NewPostgres создаёт новое PostgreSQL хранилище
+// NewPostgres создаёт новое подключение к PostgreSQL.
+// dsn — строка подключения (например, postgres://user:pass@host:5432/dbname).
+// Выполняет Ping для проверки доступности БД при инициализации.
 func NewPostgres(dsn string) (*PostgresStorage, error) {
 	db, err := sql.Open("postgres", dsn)
 	if err != nil {

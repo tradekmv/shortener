@@ -14,28 +14,32 @@ import (
 	"github.com/rs/zerolog"
 )
 
-// Event представляет событие аудита
+// Event представляет одну запись события аудита.
+// Сериализуется в JSON для передачи наблюдателям.
 type Event struct {
-	Timestamp int64  `json:"ts"`
-	Action    string `json:"action"`
-	UserID    string `json:"user_id"`
-	URL       string `json:"url"`
+	Timestamp int64  `json:"ts"`      // Unix-время в миллисекундах
+	Action    string `json:"action"`  // Действие (например, "shorten", "delete")
+	UserID    string `json:"user_id"` // Идентификатор пользователя
+	URL       string `json:"url"`     // Затронутый URL
 }
 
-// Observer интерфейс наблюдателя для получения событий аудита
+// Observer — интерфейс наблюдателя для получения событий аудита.
+// Реализации: FileObserver (запись в файл), RemoteObserver (HTTP POST).
 type Observer interface {
 	Notify(event Event) error
 	Close() error
 }
 
-// Publisher издатель событий аудита (паттерн Observer)
+// Publisher — издатель событий аудита (паттерн Observer).
+// Безопасен для конкурентного использования.
 type Publisher struct {
 	mu        sync.RWMutex
 	observers []Observer
 	log       *zerolog.Logger
 }
 
-// NewPublisher создаёт новый издатель событий аудита
+// NewPublisher создаёт новый издатель событий аудита.
+// log — zerolog логгер для сообщений об ошибках наблюдателей.
 func NewPublisher(log *zerolog.Logger) *Publisher {
 	return &Publisher{
 		observers: make([]Observer, 0),
@@ -43,14 +47,16 @@ func NewPublisher(log *zerolog.Logger) *Publisher {
 	}
 }
 
-// Subscribe добавляет наблюдателя
+// Subscribe добавляет наблюдателя к издателю.
+// Один наблюдатель может быть подписан несколько раз и получит события несколько раз.
 func (p *Publisher) Subscribe(observer Observer) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.observers = append(p.observers, observer)
 }
 
-// Publish отправляет событие всем наблюдателям
+// Publish отправляет событие всем подписанным наблюдателям.
+// Ошибки отдельных наблюдателей логируются, но не прерывают рассылку.
 func (p *Publisher) Publish(event Event) {
 	p.mu.RLock()
 	defer p.mu.RUnlock()
@@ -62,7 +68,8 @@ func (p *Publisher) Publish(event Event) {
 	}
 }
 
-// Close закрывает все наблюдатели
+// Close закрывает всех наблюдателей.
+// Возвращает агрегированную ошибку, если несколько наблюдателей вернули ошибки.
 func (p *Publisher) Close() error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -80,13 +87,15 @@ func (p *Publisher) Close() error {
 	return nil
 }
 
-// FileObserver наблюдатель для записи событий в файл
+// FileObserver — наблюдатель, записывающий события в JSONL-файл.
+// Каждое событие — отдельная строка, синхронизируется с диском через fsync.
 type FileObserver struct {
 	file *os.File
 	mu   sync.Mutex
 }
 
-// NewFileObserver создаёт наблюдатель для записи в файл
+// NewFileObserver создаёт наблюдатель, записывающий события в указанный файл.
+// Файл открывается в режиме append+create. После каждой записи вызывается fsync.
 func NewFileObserver(filePath string) (*FileObserver, error) {
 	file, err := os.OpenFile(filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	if err != nil {
@@ -96,7 +105,8 @@ func NewFileObserver(filePath string) (*FileObserver, error) {
 	return &FileObserver{file: file}, nil
 }
 
-// Notify записывает событие в файл
+// Notify записывает событие в файл в формате JSON + перевод строки.
+// Вызывает fsync после каждой записи для надёжности.
 func (f *FileObserver) Notify(event Event) error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -121,20 +131,22 @@ func (f *FileObserver) Notify(event Event) error {
 	return nil
 }
 
-// Close закрывает файл
+// Close закрывает файл наблюдателя.
 func (f *FileObserver) Close() error {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.file.Close()
 }
 
-// RemoteObserver наблюдатель для отправки событий на удалённый сервер
+// RemoteObserver — наблюдатель, отправляющий события на удалённый сервер по HTTP POST.
+// Использует http.Client с таймаутом 5 секунд.
 type RemoteObserver struct {
 	url    string
 	client *http.Client
 }
 
-// NewRemoteObserver создаёт наблюдатель для отправки на удалённый сервер
+// NewRemoteObserver создаёт наблюдатель, отправляющий события на удалённый сервер.
+// url — адрес принимающего API в формате http://host/path.
 func NewRemoteObserver(url string) *RemoteObserver {
 	return &RemoteObserver{
 		url: url,
@@ -144,7 +156,8 @@ func NewRemoteObserver(url string) *RemoteObserver {
 	}
 }
 
-// Notify отправляет событие на удалённый сервер
+// Notify отправляет событие на удалённый сервер по HTTP POST.
+// Возвращает ошибку при сетевых проблемах или HTTP-статусе >= 400.
 func (r *RemoteObserver) Notify(event Event) error {
 	data, err := json.Marshal(event)
 	if err != nil {
@@ -164,7 +177,7 @@ func (r *RemoteObserver) Notify(event Event) error {
 	return nil
 }
 
-// Close закрывает HTTP клиент
+// Close закрывает HTTP-клиент (закрывает idle-соединения).
 func (r *RemoteObserver) Close() error {
 	r.client.CloseIdleConnections()
 	return nil

@@ -1,6 +1,11 @@
+// Package storage предоставляет интерфейсы и реализации хранилища для URL-ссылок.
+//
+// Поддерживаются три реализации:
+//   - MemoryStorage — данные в оперативной памяти (для тестов и быстрого прототипирования).
+//   - Shortener — файловое хранилище, перезаписывает JSON-файл при каждом изменении.
+//   - PostgresStorage — реляционное хранилище с уникальными индексами.
 //go:generate mockgen -source=storage.go -destination=mock/mock.go
 
-// Пакет storage предоставляет интерфейсы и реализации хранилища для URL-ссылок
 package storage
 
 import (
@@ -14,15 +19,20 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// Ошибки хранилища
+// Ошибки хранилища.
 var (
-	ErrAlreadyExists    = errors.New("короткая ссылка уже существует")
+	// ErrAlreadyExists возвращается, когда короткий ID уже занят.
+	ErrAlreadyExists = errors.New("короткая ссылка уже существует")
+	// ErrURLAlreadyExists возвращается, когда оригинальный URL уже сокращён.
 	ErrURLAlreadyExists = errors.New("URL уже существует")
-	ErrNotFound         = errors.New("короткая ссылка не найдена")
-	ErrDeletedGone      = errors.New("URL удалён")
+	// ErrNotFound возвращается, если короткая ссылка не найдена.
+	ErrNotFound = errors.New("короткая ссылка не найдена")
+	// ErrDeletedGone возвращается, если URL был удалён пользователем.
+	ErrDeletedGone = errors.New("URL удалён")
 )
 
-// URLRecord представляет запись сокращённой ссылки
+// URLRecord представляет одну запись сокращённой ссылки.
+// Используется для чтения/записи между слоями сервиса и хранилищем.
 type URLRecord struct {
 	UUID        string `json:"uuid"`
 	ShortURL    string `json:"short_url"`
@@ -30,37 +40,47 @@ type URLRecord struct {
 	IsDeleted   bool   `json:"is_deleted,omitempty"`
 }
 
-// Storage интерфейс хранилища
+// Storage — интерфейс хранилища URL-ссылок.
+// Реализации должны быть безопасны для конкурентного использования.
 type Storage interface {
+	// Save сохраняет пару (shortID, originalURL).
 	Save(ctx context.Context, shortID, originalURL string) error
-	// SaveWithUserID сохраняет URL с привязкой к userID
+	// SaveWithUserID сохраняет URL с привязкой к userID.
 	SaveWithUserID(ctx context.Context, shortID, originalURL, userID string) error
+	// Get возвращает originalURL по shortID.
 	Get(ctx context.Context, shortID string) (string, error)
-	// GetByOriginalURL возвращает shortURL по originalURL
+	// GetByOriginalURL возвращает shortURL по originalURL.
+	// Используется для идемпотентного сохранения.
 	GetByOriginalURL(originalURL string) (string, bool)
-	// SaveBatch saves multiple URLs in one operation.
+	// SaveBatch сокращает несколько URL за один вызов.
 	SaveBatch(ctx context.Context, urls []URLRecord) ([]URLRecord, error)
-	// GetUserURLs возвращает все URLs для указанного userID
+	// GetUserURLs возвращает все URL пользователя.
 	GetUserURLs(ctx context.Context, userID string) ([]URLRecord, error)
-	// DeleteUserURLs помечает URL как удалённые (только для владельца)
+	// DeleteUserURLs помечает URL пользователя как удалённые.
 	DeleteUserURLs(ctx context.Context, userID string, shortIDs []string) error
+	// Close освобождает ресурсы хранилища.
 	Close() error
+	// Ping проверяет доступность хранилища.
 	Ping() error
 }
 
-// Pinger интерфейс для проверки соединения
+// Pinger — интерфейс проверки соединения.
+// Любая реализация может быть проверена на доступность через Ping().
 type Pinger interface {
 	Ping() error
 }
 
-// Shortener реализует файловый storage для хранения URL
+// Shortener — файловая реализация хранилища Storage.
+// Хранит данные в JSON-файле, перезаписывая его при каждом изменении.
+// Подходит для небольших нагрузок и однопроцессных развёртываний.
 type Shortener struct {
 	mu       sync.RWMutex
 	storage  map[string]string
 	filePath string
 }
 
-// New создает новый экземпляр Shortener с файловым хранилищем
+// New создаёт новый экземпляр Shortener.
+// filePath — путь к JSON-файлу с данными. Если пустая строка, файл не используется.
 func New(filePath string) (*Shortener, error) {
 	s := &Shortener{
 		storage:  make(map[string]string),
@@ -118,7 +138,9 @@ func (s *Shortener) saveToFile() error {
 	return nil
 }
 
-// Save сохраняет короткий ID и оригинальный URL
+// Save сохраняет короткий ID и оригинальный URL.
+// При коллизии shortID возвращает ErrAlreadyExists.
+// После каждого вызова перезаписывает файл хранилища.
 func (s *Shortener) Save(ctx context.Context, shortID, originalURL string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -134,12 +156,14 @@ func (s *Shortener) Save(ctx context.Context, shortID, originalURL string) error
 	return nil
 }
 
-// SaveWithUserID сохраняет URL с привязкой к userID (для файлового storage - просто Save)
+// SaveWithUserID сохраняет URL с привязкой к userID.
+// В файловой реализации userID игнорируется.
 func (s *Shortener) SaveWithUserID(ctx context.Context, shortID, originalURL, userID string) error {
 	return s.Save(ctx, shortID, originalURL)
 }
 
-// Get возвращает оригинальный URL по shortID
+// Get возвращает оригинальный URL по shortID.
+// Возвращает ErrNotFound, если запись отсутствует.
 func (s *Shortener) Get(ctx context.Context, shortID string) (string, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -150,7 +174,8 @@ func (s *Shortener) Get(ctx context.Context, shortID string) (string, error) {
 	return originalURL, nil
 }
 
-// GetByOriginalURL возвращает shortURL по originalURL (stub для файлового хранилища)
+// GetByOriginalURL возвращает shortURL по originalURL.
+// Реализация линейно сканирует map (O(n)).
 func (s *Shortener) GetByOriginalURL(originalURL string) (string, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -162,7 +187,8 @@ func (s *Shortener) GetByOriginalURL(originalURL string) (string, bool) {
 	return "", false
 }
 
-// SaveBatch saves multiple URLs in one operation for file storage
+// SaveBatch сохраняет несколько URL за один вызов.
+// Дубликаты с совпадающим originalURL пропускаются.
 func (s *Shortener) SaveBatch(ctx context.Context, urls []URLRecord) ([]URLRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -191,22 +217,24 @@ func (s *Shortener) SaveBatch(ctx context.Context, urls []URLRecord) ([]URLRecor
 	return result, nil
 }
 
-// Close закрывает хранилище (пустая реализация для файлового хранилища)
+// Close освобождает ресурсы (для файлового хранилища — no-op).
 func (s *Shortener) Close() error {
 	return nil
 }
 
-// Ping проверяет доступность хранилища
+// Ping всегда возвращает nil (файловое хранилище всегда доступно).
 func (s *Shortener) Ping() error {
 	return nil
 }
 
-// GetUserURLs возвращает все URLs для указанного userID (файловое хранилище не поддерживает множественных пользователей)
+// GetUserURLs не поддерживается файловым хранилищем.
+// Всегда возвращает (nil, nil).
 func (s *Shortener) GetUserURLs(ctx context.Context, userID string) ([]URLRecord, error) {
 	return nil, nil
 }
 
-// DeleteUserURLs помечает URLs как удалённые (файловое хранилище не поддерживает userID, просто помечает)
+// DeleteUserURLs удаляет записи по shortIDs.
+// Файловое хранилище не различает владельцев, поэтому удаляет без проверки userID.
 func (s *Shortener) DeleteUserURLs(ctx context.Context, userID string, shortIDs []string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
