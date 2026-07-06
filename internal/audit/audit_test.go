@@ -1,4 +1,4 @@
-// Пакет audit реализует паттерн Observer (Наблюдатель) для аудита запросов.
+// Package audit реализует паттерн Observer (Наблюдатель) для аудита запросов.
 // Publisher рассылает события аудита всем подписанным наблюдателям (файл, удалённый сервер).
 package audit
 
@@ -7,7 +7,9 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -43,6 +45,7 @@ func (m *MockObserver) Events() []Event {
 func TestPublisher_PublishToAllObservers(t *testing.T) {
 	log := testLogger
 	pub := NewPublisher(&log)
+	defer pub.Close()
 
 	observer1 := &MockObserver{}
 	observer2 := &MockObserver{}
@@ -58,6 +61,11 @@ func TestPublisher_PublishToAllObservers(t *testing.T) {
 	}
 
 	pub.Publish(event)
+
+	// Publish асинхронный: Close дожидается обработки всех событий из очереди.
+	if err := pub.Close(); err != nil {
+		t.Fatalf("ошибка закрытия Publisher: %v", err)
+	}
 
 	if len(observer1.Events()) != 1 {
 		t.Errorf("ожидалось 1 событие у observer1, получено %d", len(observer1.Events()))
@@ -122,7 +130,7 @@ func TestFileObserver_WriteAndClose(t *testing.T) {
 	}
 
 	// Проверяем, что каждое событие записано на отдельной строке
-	lines := splitLines(content)
+	lines := strings.Split(strings.TrimRight(content, "\n"), "\n")
 	if len(lines) != len(events) {
 		t.Errorf("ожидалось %d строк, получено %d", len(events), len(lines))
 	}
@@ -223,24 +231,143 @@ func TestPublisher_CloseAll(t *testing.T) {
 	}
 }
 
-// splitLines разбивает строку на строки по переносу
-func splitLines(s string) []string {
-	var lines []string
-	current := ""
-	for _, c := range s {
-		if c == '\n' {
-			if current != "" {
-				lines = append(lines, current)
-				current = ""
+// TestPublisher_DrainQueueOnClose проверяет, что события,
+// отправленные непосредственно перед Close, не теряются.
+func TestPublisher_DrainQueueOnClose(t *testing.T) {
+	log := testLogger
+	pub := NewPublisher(&log)
+
+	const count = 100
+	observer := &MockObserver{}
+	pub.Subscribe(observer)
+
+	for i := 0; i < count; i++ {
+		pub.Publish(Event{Action: "shorten", URL: "https://example.com"})
+	}
+
+	if err := pub.Close(); err != nil {
+		t.Fatalf("ошибка Close: %v", err)
+	}
+
+	if got := len(observer.Events()); got != count {
+		t.Errorf("после Close ожидалось %d событий, получено %d", count, got)
+	}
+}
+
+// TestPublisher_PublishFromMultipleGoroutines проверяет,
+// что Publish безопасен для конкурентного использования.
+func TestPublisher_PublishFromMultipleGoroutines(t *testing.T) {
+	log := testLogger
+	pub := NewPublisher(&log)
+
+	const (
+		writers         = 10
+		eventsPerWriter = 50
+	)
+
+	observer := &MockObserver{}
+	pub.Subscribe(observer)
+
+	var wg sync.WaitGroup
+	for i := 0; i < writers; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			for j := 0; j < eventsPerWriter; j++ {
+				pub.Publish(Event{
+					Action: "shorten",
+					URL:    "https://example.com",
+				})
 			}
-		} else {
-			current += string(c)
+		}(i)
+	}
+	wg.Wait()
+
+	if err := pub.Close(); err != nil {
+		t.Fatalf("ошибка Close: %v", err)
+	}
+
+	want := writers * eventsPerWriter
+	if got := len(observer.Events()); got != want {
+		t.Errorf("ожидалось %d событий, получено %d", want, got)
+	}
+}
+
+// TestRemoteObserver_RetriesOnServerError проверяет ретраи при 5xx ответах.
+func TestRemoteObserver_RetriesOnServerError(t *testing.T) {
+	var attempts int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&attempts, 1)
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer server.Close()
+
+	observer := NewRemoteObserver(server.URL)
+	defer observer.Close()
+
+	event := Event{Action: "shorten", URL: "https://example.com"}
+	err := observer.Notify(event)
+
+	if err == nil {
+		t.Errorf("ожидалась ошибка после ретраев")
+	}
+	got := atomic.LoadInt32(&attempts)
+	if got != int32(remoteMaxRetries) {
+		t.Errorf("ожидалось %d попыток, получено %d", remoteMaxRetries, got)
+	}
+}
+
+// TestRemoteObserver_NoRetryOnClientError проверяет отсутствие ретраев при 4xx.
+func TestRemoteObserver_NoRetryOnClientError(t *testing.T) {
+	var attempts int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&attempts, 1)
+		w.WriteHeader(http.StatusBadRequest)
+	}))
+	defer server.Close()
+
+	observer := NewRemoteObserver(server.URL)
+	defer observer.Close()
+
+	event := Event{Action: "shorten", URL: "https://example.com"}
+	err := observer.Notify(event)
+
+	if err == nil {
+		t.Errorf("ожидалась ошибка")
+	}
+	got := atomic.LoadInt32(&attempts)
+	if got != 1 {
+		t.Errorf("ожидалась 1 попытка (без ретраев), получено %d", got)
+	}
+}
+
+// TestRemoteObserver_RetryThenSuccess проверяет успех после нескольких 5xx.
+func TestRemoteObserver_RetryThenSuccess(t *testing.T) {
+	var attempts int32
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := atomic.AddInt32(&attempts, 1)
+		if n < 2 {
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
 		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	observer := NewRemoteObserver(server.URL)
+	defer observer.Close()
+
+	event := Event{Action: "shorten", URL: "https://example.com"}
+	if err := observer.Notify(event); err != nil {
+		t.Errorf("неожиданная ошибка: %v", err)
 	}
-	if current != "" {
-		lines = append(lines, current)
+	got := atomic.LoadInt32(&attempts)
+	if got != 2 {
+		t.Errorf("ожидалось 2 попытки, получено %d", got)
 	}
-	return lines
 }
 
 // Компилируем проверку, что MockObserver реализует интерфейс Observer

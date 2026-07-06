@@ -70,6 +70,9 @@ func New() *Registry {
 // A nil c is silently ignored to make registration idempotent in
 // optional-resource patterns.
 func (r *Registry) Register(c Closeable) {
+	if c == nil {
+		return
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.items = append(r.items, c)

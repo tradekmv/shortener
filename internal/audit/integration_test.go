@@ -160,7 +160,10 @@ func TestPublisher_MultipleObservers(t *testing.T) {
 		pub.Publish(event)
 	}
 
-	time.Sleep(100 * time.Millisecond)
+	// Publish асинхронный: Close дожидается обработки всех событий из очереди.
+	if err := pub.Close(); err != nil {
+		t.Fatalf("ошибка закрытия Publisher: %v", err)
+	}
 
 	// Проверяем файл
 	data, err := os.ReadFile(tmpFile.Name())

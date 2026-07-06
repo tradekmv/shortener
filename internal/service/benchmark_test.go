@@ -10,7 +10,7 @@ import (
 
 func BenchmarkGenerateID(b *testing.B) {
 	b.ReportAllocs()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, err := generateID(length)
 		if err != nil {
 			b.Fatal(err)
@@ -21,13 +21,15 @@ func BenchmarkGenerateID(b *testing.B) {
 func BenchmarkSave(b *testing.B) {
 	svc := NewService(storage.NewMemory())
 	ctx := context.Background()
+	i := 0
 	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, err := svc.Save(ctx, "https://example.com/"+strconv.Itoa(i))
 		if err != nil {
 			b.Fatal(err)
 		}
+		i++
 	}
 }
 
@@ -40,7 +42,7 @@ func BenchmarkSaveBatch(b *testing.B) {
 	}
 	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, err := svc.SaveBatch(ctx, urls)
 		if err != nil {
 			b.Fatal(err)
@@ -57,9 +59,11 @@ func BenchmarkGet(b *testing.B) {
 		id, _ := svc.Save(ctx, "https://example.com/"+strconv.Itoa(i))
 		ids[i] = id
 	}
+	i := 0
 	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, _ = svc.Get(ctx, ids[i%n])
+		i++
 	}
 }

@@ -4,8 +4,8 @@
 //   - MemoryStorage — данные в оперативной памяти (для тестов и быстрого прототипирования).
 //   - Shortener — файловое хранилище, перезаписывает JSON-файл при каждом изменении.
 //   - PostgresStorage — реляционное хранилище с уникальными индексами.
+//
 //go:generate mockgen -source=storage.go -destination=mock/mock.go
-
 package storage
 
 import (
