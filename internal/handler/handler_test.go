@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/rs/zerolog"
 	"github.com/tradekmv/shortener.git/internal/repository/storage"
 	mock_storage "github.com/tradekmv/shortener.git/internal/repository/storage/mock"
@@ -348,4 +349,167 @@ func TestAPIBatchShortenHandler_EmptyURL(t *testing.T) {
 	if w.Code != http.StatusBadRequest {
 		t.Errorf("ожидался статус %d, получен %d", http.StatusBadRequest, w.Code)
 	}
+}
+
+func TestGetUserURLsHandler_Success(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockStorage := mock_storage.NewMockStorage(ctrl)
+	mockStorage.EXPECT().GetUserURLs(gomock.Any(), gomock.Any()).Return([]storage.URLRecord{
+		{ShortURL: "abc123", OriginalURL: "https://example.com"},
+	}, nil)
+
+	svc := service.NewService(mockStorage)
+	h := New(svc, "http://localhost:8080", mockStorage, &testLogger, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/user/urls", nil)
+	w := httptest.NewRecorder()
+
+	h.GetUserURLsHandler(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("ожидался статус %d, получен %d", http.StatusOK, w.Code)
+	}
+
+	contentType := w.Header().Get("Content-Type")
+	if contentType != "application/json" {
+		t.Errorf("ожидался Content-Type 'application/json', получен '%s'", contentType)
+	}
+}
+
+func TestGetUserURLsHandler_NoContent(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockStorage := mock_storage.NewMockStorage(ctrl)
+	mockStorage.EXPECT().GetUserURLs(gomock.Any(), gomock.Any()).Return([]storage.URLRecord{}, nil)
+
+	svc := service.NewService(mockStorage)
+	h := New(svc, "http://localhost:8080", mockStorage, &testLogger, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/user/urls", nil)
+	w := httptest.NewRecorder()
+
+	h.GetUserURLsHandler(w, req)
+
+	if w.Code != http.StatusNoContent {
+		t.Errorf("ожидался статус %d, получен %d", http.StatusNoContent, w.Code)
+	}
+}
+
+func TestGetUserURLsHandler_Error(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockStorage := mock_storage.NewMockStorage(ctrl)
+	mockStorage.EXPECT().GetUserURLs(gomock.Any(), gomock.Any()).Return(nil, errors.New("db error"))
+
+	svc := service.NewService(mockStorage)
+	h := New(svc, "http://localhost:8080", mockStorage, &testLogger, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/user/urls", nil)
+	w := httptest.NewRecorder()
+
+	h.GetUserURLsHandler(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("ожидался статус %d, получен %d", http.StatusInternalServerError, w.Code)
+	}
+}
+
+func TestDeleteUserURLsHandler_Success(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockStorage := mock_storage.NewMockStorage(ctrl)
+	svc := service.NewService(mockStorage)
+	h := New(svc, "http://localhost:8080", mockStorage, &testLogger, nil)
+
+	body := `["abc123", "def456"]`
+	req := httptest.NewRequest(http.MethodDelete, "/api/user/urls", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	h.DeleteUserURLsHandler(w, req)
+
+	if w.Code != http.StatusAccepted {
+		t.Errorf("ожидался статус %d, получен %d", http.StatusAccepted, w.Code)
+	}
+}
+
+func TestDeleteUserURLsHandler_EmptyList(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockStorage := mock_storage.NewMockStorage(ctrl)
+	svc := service.NewService(mockStorage)
+	h := New(svc, "http://localhost:8080", mockStorage, &testLogger, nil)
+
+	body := `[]`
+	req := httptest.NewRequest(http.MethodDelete, "/api/user/urls", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	h.DeleteUserURLsHandler(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("ожидался статус %d, получен %d", http.StatusBadRequest, w.Code)
+	}
+}
+
+func TestGetHandler_Deleted(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockStorage := mock_storage.NewMockStorage(ctrl)
+	mockStorage.EXPECT().Get(gomock.Any(), "abc123").Return("", service.ErrDeletedGone)
+
+	svc := service.NewService(mockStorage)
+	h := New(svc, "http://localhost:8080", nil, &testLogger, nil)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/{id}", h.GetHandler)
+
+	req := httptest.NewRequest(http.MethodGet, "/abc123", nil)
+	w := httptest.NewRecorder()
+
+	mux.ServeHTTP(w, req)
+
+	if w.Code != http.StatusGone {
+		t.Errorf("ожидался статус %d, получен %d", http.StatusGone, w.Code)
+	}
+}
+
+func TestGetHandler_EmptyID(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockStorage := mock_storage.NewMockStorage(ctrl)
+	svc := service.NewService(mockStorage)
+	h := New(svc, "http://localhost:8080", nil, &testLogger, nil)
+
+	r := chi.NewRouter()
+	r.Get("/{id}", h.GetHandler)
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	w := httptest.NewRecorder()
+
+	r.ServeHTTP(w, req)
+
+	// Chi router returns 404 when path doesn't match the pattern
+	if w.Code != http.StatusNotFound {
+		t.Errorf("ожидался статус 404 для пустого ID, получен %d", w.Code)
+	}
+}
+
+func TestHandler_Close(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	mockStorage := mock_storage.NewMockStorage(ctrl)
+	svc := service.NewService(mockStorage)
+	h := New(svc, "http://localhost:8080", mockStorage, &testLogger, nil)
+
+	h.Close()
 }

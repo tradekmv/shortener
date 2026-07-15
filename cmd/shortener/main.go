@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"os"
 	"os/signal"
@@ -18,16 +19,18 @@ import (
 	"github.com/tradekmv/shortener.git/pkg/registry"
 )
 
+// main — точка входа в приложение.
+// Выполняет graceful shutdown всех ресурсов перед завершением.
 func main() {
 	log := logger.New()
 
-	// Registry для управления ресурсами
 	reg := registry.New()
 
 	cfg, err := config.Load()
 	if err != nil {
 		log.Printf("Ошибка парсинга флагов: %v", err)
-		os.Exit(1)
+		reg.CloseAll()
+		return
 	}
 
 	r := chi.NewRouter()
@@ -37,11 +40,9 @@ func main() {
 	})
 	r.Use(middleware.GzipMiddleware)
 
-	// Выбираем хранилище в зависимости от конфигурации
 	store := initStorage(cfg, log)
 	reg.Register(store)
 
-	// Инициализация аудита (паттерн Observer)
 	auditPub := initAudit(cfg, log)
 	if auditPub != nil {
 		reg.Register(auditPub)
@@ -60,32 +61,34 @@ func main() {
 
 	addr := cfg.ServerAddress
 
-	// Graceful shutdown
 	srv := &http.Server{
 		Addr:    addr,
 		Handler: r,
 	}
 
-	// Запуск сервера в горутине
+	serverErr := make(chan error, 1)
+
 	go func() {
 		log.Printf("Сервер запущен на %s", addr)
-		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Printf("Ошибка сервера: %v", err)
-			os.Exit(1)
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			serverErr <- err
 		}
 	}()
 
-	// Ожидание сигнала для завершения
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
-	<-quit
+
+	select {
+	case <-quit:
+		log.Println("Получен сигнал завершения")
+	case err := <-serverErr:
+		log.Printf("Ошибка сервера: %v", err)
+	}
 
 	log.Println("Завершение работы сервера...")
 
-	// Закрываем воркеры handler
 	h.Close()
 
-	// Закрываем все ресурсы через registry
 	if err := reg.CloseAll(); err != nil {
 		log.Printf("Ошибка закрытия ресурсов: %v", err)
 	}
@@ -98,7 +101,6 @@ func main() {
 
 // initStorage выбирает хранилище с учётом конфигурации и fallback-логикой
 func initStorage(cfg *config.Config, log *logger.Logger) storage.Storage {
-	// 1. PostgreSQL
 	if cfg.DatabaseDSN != "" {
 		store, err := storage.NewPostgres(cfg.DatabaseDSN)
 		if err == nil {
@@ -108,7 +110,6 @@ func initStorage(cfg *config.Config, log *logger.Logger) storage.Storage {
 		log.Printf("Ошибка подключения к PostgreSQL: %v", err)
 	}
 
-	// 2. Файловое хранилище
 	if cfg.FileStoragePath != "" {
 		store, err := storage.New(cfg.FileStoragePath)
 		if err == nil {
@@ -118,15 +119,12 @@ func initStorage(cfg *config.Config, log *logger.Logger) storage.Storage {
 		log.Printf("Ошибка инициализации файлового хранилища: %v", err)
 	}
 
-	// 3. Память (fallback)
 	log.Println("Используем хранилище в памяти")
 	return storage.NewMemory()
 }
 
 // initAudit инициализирует систему аудита с наблюдателями (паттерн Observer)
-// Возвращает nil если аудит отключён
 func initAudit(cfg *config.Config, log *logger.Logger) *audit.Publisher {
-	// Если нет ни файла, ни URL — аудит отключён
 	if cfg.AuditFile == "" && cfg.AuditURL == "" {
 		log.Println("Аудит отключён")
 		return nil
@@ -134,7 +132,6 @@ func initAudit(cfg *config.Config, log *logger.Logger) *audit.Publisher {
 
 	publisher := audit.NewPublisher(log)
 
-	// Наблюдатель для файла
 	if cfg.AuditFile != "" {
 		fileObs, err := audit.NewFileObserver(cfg.AuditFile)
 		if err != nil {
@@ -145,7 +142,6 @@ func initAudit(cfg *config.Config, log *logger.Logger) *audit.Publisher {
 		}
 	}
 
-	// Наблюдатель для удалённого сервера
 	if cfg.AuditURL != "" {
 		remoteObs := audit.NewRemoteObserver(cfg.AuditURL)
 		publisher.Subscribe(remoteObs)
