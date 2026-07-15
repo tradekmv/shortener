@@ -1,3 +1,4 @@
+// Package handler реализует HTTP-обработчики REST API для сервиса сокращения URL.
 package handler
 
 import (
@@ -12,38 +13,41 @@ import (
 	"time"
 
 	"github.com/rs/zerolog"
+	"github.com/tradekmv/shortener.git/internal/audit"
 	"github.com/tradekmv/shortener.git/internal/auth"
 	"github.com/tradekmv/shortener.git/internal/repository/storage"
 	"github.com/tradekmv/shortener.git/internal/service"
 )
 
-// ShortenerRequest представляет запрос на создание короткой ссылки
+// ShortenerRequest — тело запроса на создание короткой ссылки в формате JSON.
 type ShortenerRequest struct {
 	URL string `json:"url"`
 }
 
-// ShortenerResponse представляет ответ с короткой ссылкой
+// ShortenerResponse — тело ответа с короткой ссылкой.
 type ShortenerResponse struct {
 	Result string `json:"result"`
 }
 
-// BatchRequestItem represents a single URL in batch request
+// BatchRequestItem — один элемент пакетного запроса на сокращение.
 type BatchRequestItem struct {
 	CorrelationID string `json:"correlation_id"`
 	OriginalURL   string `json:"original_url"`
 }
 
-// BatchResponseItem represents a single result in batch response
+// BatchResponseItem — один элемент пакетного ответа.
 type BatchResponseItem struct {
 	CorrelationID string `json:"correlation_id"`
 	ShortURL      string `json:"short_url"`
 }
 
-// ShortenerHandler обрабатывает HTTP-запросы для сокращения URL
+// ShortenerHandler обрабатывает HTTP-запросы для сокращения URL.
+// Реализует батчинг запросов на удаление для повышения производительности.
 type ShortenerHandler struct {
-	service *service.Service
-	baseURL string
-	log     *zerolog.Logger
+	service  *service.Service
+	baseURL  string
+	log      *zerolog.Logger
+	auditPub *audit.Publisher
 
 	// Fan-in для асинхронного удаления с батчингом
 	deleteChan   chan deleteRequest
@@ -54,18 +58,22 @@ type ShortenerHandler struct {
 	batchTicker  *time.Ticker
 }
 
-// deleteRequest запрос на удаление URL
+// deleteRequest — запрос на удаление URL пользователя (внутренний тип).
 type deleteRequest struct {
 	userID   string
 	shortIDs []string
 }
 
-// New создает новый экземпляр ShortenerHandler
-func New(service *service.Service, baseURL string, store storage.Storage, log *zerolog.Logger) *ShortenerHandler {
+// New создаёт новый экземпляр ShortenerHandler.
+// service — бизнес-логика; baseURL — внешний URL сервиса; store — хранилище;
+// log — логгер; auditPub — издатель событий аудита.
+// Запускает воркеры для асинхронного батчинга удалений.
+func New(service *service.Service, baseURL string, store storage.Storage, log *zerolog.Logger, auditPub *audit.Publisher) *ShortenerHandler {
 	h := &ShortenerHandler{
 		service:      service,
 		baseURL:      baseURL,
 		log:          log,
+		auditPub:     auditPub,
 		deleteChan:   make(chan deleteRequest, 100),
 		stopChan:     make(chan struct{}),
 		batchPending: make(map[string][]string),
@@ -124,7 +132,8 @@ func (h *ShortenerHandler) flushBatch() {
 	}
 }
 
-// PingHandler проверяет соединение с хранилищем
+// PingHandler обрабатывает GET /ping.
+// Возвращает 200 OK при доступности хранилища, иначе 500 Internal Server Error.
 func (h *ShortenerHandler) PingHandler(w http.ResponseWriter, r *http.Request) {
 	if err := h.service.Ping(); err != nil {
 		h.log.Printf("Ошибка проверки соединения: %v", err)
@@ -134,7 +143,10 @@ func (h *ShortenerHandler) PingHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
-// PostHandler обрабатывает POST запросы для создания короткой ссылки
+// PostHandler обрабатывает POST /.
+// Принимает тело как текст (URL) и возвращает короткий идентификатор.
+// Создаёт анонимного пользователя через куку при необходимости.
+// Публикует событие аудита "shorten".
 func (h *ShortenerHandler) PostHandler(w http.ResponseWriter, r *http.Request) {
 	// Создаём или получаем userID из cookie
 	userID, err := auth.CreateUserIDIfNeeded(w, r)
@@ -180,6 +192,16 @@ func (h *ShortenerHandler) PostHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Аудит: событие shorten после успешного создания
+	if h.auditPub != nil {
+		h.auditPub.Publish(audit.Event{
+			Timestamp: time.Now().Unix(),
+			Action:    "shorten",
+			UserID:    userID,
+			URL:       originalURL,
+		})
+	}
+
 	w.Header().Set("Content-Type", "text/plain")
 	w.WriteHeader(http.StatusCreated)
 	_, err = w.Write([]byte(shortURL))
@@ -188,7 +210,9 @@ func (h *ShortenerHandler) PostHandler(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// GetHandler обрабатывает GET запросы для редиректа по короткому ID
+// GetHandler обрабатывает GET /{id}.
+// Возвращает 302 Redirect на оригинальный URL.
+// 410 Gone, если URL был удалён; 404 Not Found, если ссылка не найдена.
 func (h *ShortenerHandler) GetHandler(w http.ResponseWriter, r *http.Request) {
 	shortID := r.PathValue("id")
 	if shortID == "" {
@@ -211,11 +235,26 @@ func (h *ShortenerHandler) GetHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Получаем userID из куки для аудита
+	userID, _ := auth.GetUserIDFromCookie(r)
+
+	// Аудит: событие follow после успешного получения URL
+	if h.auditPub != nil {
+		h.auditPub.Publish(audit.Event{
+			Timestamp: time.Now().Unix(),
+			Action:    "follow",
+			UserID:    userID,
+			URL:       originalURL,
+		})
+	}
+
 	w.Header().Set("Location", originalURL)
 	w.WriteHeader(http.StatusTemporaryRedirect)
 }
 
-// APIShortenHandler обрабатывает POST запросы JSON API для создания короткой ссылки
+// APIShortenHandler обрабатывает POST /api/shorten.
+// Принимает JSON {"url": "..."}, возвращает JSON {"result": "..."}.
+// Публикует событие аудита "shorten".
 func (h *ShortenerHandler) APIShortenHandler(w http.ResponseWriter, r *http.Request) {
 	// Создаём или получаем userID из cookie
 	userID, err := auth.CreateUserIDIfNeeded(w, r)
@@ -260,6 +299,16 @@ func (h *ShortenerHandler) APIShortenHandler(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
+	// Аудит: событие shorten после успешного создания
+	if h.auditPub != nil {
+		h.auditPub.Publish(audit.Event{
+			Timestamp: time.Now().Unix(),
+			Action:    "shorten",
+			UserID:    userID,
+			URL:       req.URL,
+		})
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 
@@ -270,7 +319,10 @@ func (h *ShortenerHandler) APIShortenHandler(w http.ResponseWriter, r *http.Requ
 	}
 }
 
-// APIBatchShortenHandler handles POST /api/shorten/batch requests for batch URL shortening
+// APIBatchShortenHandler обрабатывает POST /api/shorten/batch.
+// Принимает JSON-массив объектов {correlation_id, original_url},
+// возвращает JSON-массив объектов {correlation_id, short_url}.
+// Публикует событие аудита "shorten" для каждой успешной записи.
 func (h *ShortenerHandler) APIBatchShortenHandler(w http.ResponseWriter, r *http.Request) {
 	var req []BatchRequestItem
 
@@ -331,7 +383,9 @@ func (h *ShortenerHandler) APIBatchShortenHandler(w http.ResponseWriter, r *http
 	}
 }
 
-// GetUserURLsHandler обрабатывает GET /api/user/urls запросы
+// GetUserURLsHandler обрабатывает GET /api/user/urls.
+// Возвращает JSON-массив объектов {short_url, original_url} для текущего пользователя.
+// Требует наличия валидной куки (создаёт её при отсутствии).
 func (h *ShortenerHandler) GetUserURLsHandler(w http.ResponseWriter, r *http.Request) {
 	// Пытаемся получить userID из существующей куки или создаём новую
 	userID, err := auth.CreateUserIDIfNeeded(w, r)
@@ -392,14 +446,17 @@ type UserURLResponse struct {
 	OriginalURL string `json:"original_url"`
 }
 
-// Close останавливает воркеры и освобождает ресурсы
+// Close останавливает фоновые воркеры удаления URL.
+// Должен вызываться при graceful shutdown сервера.
 func (h *ShortenerHandler) Close() {
 	h.batchTicker.Stop()
 	close(h.stopChan)
 	h.wg.Wait()
 }
 
-// DeleteUserURLsHandler обрабатывает DELETE /api/user/urls запросы
+// DeleteUserURLsHandler обрабатывает DELETE /api/user/urls.
+// Принимает JSON-массив shortURL, удаляет их через асинхронный батч-воркер.
+// Публикует события аудита "delete" после применения удаления.
 func (h *ShortenerHandler) DeleteUserURLsHandler(w http.ResponseWriter, r *http.Request) {
 	userID, err := auth.CreateUserIDIfNeeded(w, r)
 	if err != nil {

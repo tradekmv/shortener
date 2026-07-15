@@ -11,12 +11,17 @@ import (
 )
 
 // ErrURLAlreadyExists - ошибка, возвращаемая при попытке сохранить уже существующий URL
-// PostgresStorage хранит данные в PostgreSQL
+
+// PostgresStorage — реализация хранилища Storage для PostgreSQL.
+// Использует уникальные индексы по short_url и original_url.
+// Безопасна для конкурентного использования.
 type PostgresStorage struct {
 	db *sql.DB
 }
 
-// NewPostgres создаёт новое PostgreSQL хранилище
+// NewPostgres создаёт новое подключение к PostgreSQL.
+// dsn — строка подключения (например, postgres://user:pass@host:5432/dbname).
+// Выполняет Ping для проверки доступности БД при инициализации.
 func NewPostgres(dsn string) (*PostgresStorage, error) {
 	db, err := sql.Open("postgres", dsn)
 	if err != nil {
@@ -169,7 +174,6 @@ func (s *PostgresStorage) SaveBatch(ctx context.Context, urls []URLRecord) ([]UR
 	}
 	defer tx.Rollback()
 
-	result := make([]URLRecord, 0, len(urls))
 	for _, rec := range urls {
 		_, err := tx.Exec(
 			`INSERT INTO urls (short_url, original_url) VALUES ($1, $2) ON CONFLICT (short_url) DO UPDATE SET short_url = EXCLUDED.short_url RETURNING id`,
@@ -179,16 +183,12 @@ func (s *PostgresStorage) SaveBatch(ctx context.Context, urls []URLRecord) ([]UR
 		if err != nil {
 			return nil, fmt.Errorf("ошибка вставки в БД: %w", err)
 		}
-		result = append(result, URLRecord{
-			ShortURL:    rec.ShortURL,
-			OriginalURL: rec.OriginalURL,
-		})
 	}
 
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("ошибка коммита транзакции: %w", err)
 	}
-	return result, nil
+	return urls, nil
 }
 
 // Close закрывает соединение с БД

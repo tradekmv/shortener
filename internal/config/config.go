@@ -1,3 +1,13 @@
+// Package config загружает и хранит конфигурацию приложения из флагов командной строки и переменных окружения.
+//
+// Поддерживаемые параметры:
+//
+//	-SERVER_ADDRESS: адрес HTTP-сервера (по умолчанию localhost:8080)
+//	-BASE_URL: базовый URL для коротких ссылок
+//	-FILE_STORAGE_PATH: путь к файловому хранилищу (если не указан, используется память)
+//	-DATABASE_DSN: строка подключения к PostgreSQL
+//	-AUDIT_FILE: путь к файлу аудита
+//	-AUDIT_URL: URL для отправки событий аудита
 package config
 
 import (
@@ -14,6 +24,8 @@ type Config struct {
 	BaseURL         string
 	FileStoragePath string
 	DatabaseDSN     string
+	AuditFile       string
+	AuditURL        string
 }
 
 // Load парсит конфигурацию с приоритетом: env > флаг > значение по умолчанию
@@ -28,6 +40,8 @@ func Load() (*Config, error) {
 		flag.StringVar(&cfg.FileStoragePath, "file-storage-path", "", "file storage path")
 		flag.StringVar(&cfg.DatabaseDSN, "d", "", "database DSN")
 		flag.StringVar(&cfg.DatabaseDSN, "database-dsn", "", "database DSN")
+		flag.StringVar(&cfg.AuditFile, "audit-file", "", "audit log file path")
+		flag.StringVar(&cfg.AuditURL, "audit-url", "", "audit remote server URL")
 		flagsParsed = true
 	}
 
@@ -66,6 +80,14 @@ func Load() (*Config, error) {
 
 	if val := os.Getenv("DATABASE_DSN"); val != "" {
 		cfg.DatabaseDSN = val
+	}
+
+	if val := os.Getenv("AUDIT_FILE"); val != "" {
+		cfg.AuditFile = val
+	}
+
+	if val := os.Getenv("AUDIT_URL"); val != "" {
+		cfg.AuditURL = val
 	}
 
 	return cfg, nil
