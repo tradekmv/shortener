@@ -1,3 +1,7 @@
+// Package auth реализует подписанные cookie для анонимной аутентификации пользователей.
+//
+// Кука содержит userID, подписанный HMAC-SHA256 с секретом из AUTH_SECRET_KEY.
+// Позволяет идентифицировать пользователя без серверной сессии.
 package auth
 
 import (
@@ -18,7 +22,7 @@ const (
 	separator    = "."
 )
 
-// ErrInvalidCookie ошибка при невалидной куке
+// ErrInvalidCookie возвращается при невалидной, отсутствующей или подделанной куке.
 var ErrInvalidCookie = errors.New("невалидная кука")
 
 var (
@@ -27,7 +31,8 @@ var (
 	initKeyErr error
 )
 
-// initSecret инициализирует секретный ключ из переменной окружения
+// initSecret инициализирует секретный ключ из переменной окружения AUTH_SECRET_KEY.
+// Требует минимум 32 символа.
 func initSecret() {
 	key := os.Getenv("AUTH_SECRET_KEY")
 	if key == "" {
@@ -41,7 +46,8 @@ func initSecret() {
 	secretKey = []byte(key)
 }
 
-// getHMAC возвращает HMAC-SHA256 подпись для данных
+// getHMAC возвращает HMAC-SHA256 подпись для переданных данных.
+// Использует секрет из переменной окружения AUTH_SECRET_KEY.
 func getHMAC(data string) string {
 	initOnce.Do(initSecret)
 	if secretKey == nil {
@@ -53,7 +59,8 @@ func getHMAC(data string) string {
 	return base64.URLEncoding.EncodeToString(h.Sum(nil))
 }
 
-// generateUserID генерирует уникальный ID пользователя
+// generateUserID генерирует новый уникальный идентификатор пользователя.
+// Использует 16 случайных байт из crypto/rand в URL-safe base64.
 func generateUserID() (string, error) {
 	b := make([]byte, 16)
 	if _, err := rand.Read(b); err != nil {
@@ -62,7 +69,10 @@ func generateUserID() (string, error) {
 	return base64.URLEncoding.EncodeToString(b), nil
 }
 
-// SignCookie создаёт подписанную куку с user_id
+// SignCookie устанавливает подписанную куку с userID.
+// При пустом userID возвращает ошибку.
+// Кука HttpOnly, SameSite=Lax, срок жизни 30 дней.
+// В production (RUN_ENV=production) устанавливает Secure=true.
 func SignCookie(w http.ResponseWriter, userID string) error {
 	if userID == "" {
 		return errors.New("userID не может быть пустым")
@@ -87,8 +97,8 @@ func SignCookie(w http.ResponseWriter, userID string) error {
 	return nil
 }
 
-// GetUserIDFromCookie извлекает и проверяет user_id из куки
-// Возвращает userID или ошибку ErrInvalidCookie
+// GetUserIDFromCookie извлекает и проверяет userID из куки запроса.
+// Возвращает ErrInvalidCookie, если кука отсутствует, повреждена или подделана.
 func GetUserIDFromCookie(r *http.Request) (string, error) {
 	cookie, err := r.Cookie(cookieName)
 	if err != nil {
@@ -115,8 +125,8 @@ func GetUserIDFromCookie(r *http.Request) (string, error) {
 	return userID, nil
 }
 
-// CreateUserIDIfNeeded создаёт новый userID если кука отсутствует или невалидна
-// Устанавливает куку в ответе и возвращает userID
+// CreateUserIDIfNeeded возвращает userID из куки, либо создаёт новый и устанавливает куку.
+// Используется в хендлерах, требующих идентификации пользователя.
 func CreateUserIDIfNeeded(w http.ResponseWriter, r *http.Request) (string, error) {
 	userID, err := GetUserIDFromCookie(r)
 	if err == nil && userID != "" {

@@ -1,3 +1,5 @@
+// Package service реализует бизнес-логику сервиса сокращения URL:
+// генерацию коротких идентификаторов, валидацию URL и работу с хранилищем.
 package service
 
 import (
@@ -16,26 +18,36 @@ const (
 	maxAttempts = 10
 )
 
-// Ошибки сервиса
+// Ошибки сервиса.
 var (
+	// ErrMaxRetriesExceeded возвращается, если не удалось сгенерировать
+	// уникальный ID за максимальное количество попыток.
 	ErrMaxRetriesExceeded = errors.New("не удалось сгенерировать уникальный ID после максимального количества попыток")
-	ErrURLAlreadyExists   = errors.New("URL уже существует")
-	ErrAlreadyExists      = errors.New("короткий ID уже существует")
-	ErrNotFound           = errors.New("короткая ссылка не найдена")
-	ErrDeletedGone        = errors.New("URL удалён")
+	// ErrURLAlreadyExists возвращается, когда оригинальный URL уже сокращён.
+	ErrURLAlreadyExists = errors.New("URL уже существует")
+	// ErrAlreadyExists возвращается при коллизии сгенерированного короткого ID.
+	ErrAlreadyExists = errors.New("короткий ID уже существует")
+	// ErrNotFound возвращается, если короткая ссылка не найдена.
+	ErrNotFound = errors.New("короткая ссылка не найдена")
+	// ErrDeletedGone возвращается, если URL был удалён пользователем.
+	ErrDeletedGone = errors.New("URL удалён")
 )
 
-// Service предоставляет бизнес-логику для работы с URL-ссылками
+// generate:reset
+// Service предоставляет бизнес-логику для работы с URL-ссылками.
+// Инкапсулирует хранилище и применяет правила генерации идентификаторов.
 type Service struct {
 	storage storage.Storage
 }
 
-// NewService создает новый экземпляр Service
+// NewService создаёт новый экземпляр Service поверх переданного хранилища.
+// storage — реализация интерфейса storage.Storage (memory, file, postgres).
 func NewService(storage storage.Storage) *Service {
 	return &Service{storage: storage}
 }
 
-// Ping проверяет соединение с хранилищем
+// Ping проверяет соединение с хранилищем.
+// Возвращает ошибку, если хранилище недоступно или не инициализировано.
 func (s *Service) Ping() error {
 	if s.storage == nil {
 		return errors.New("storage is nil")
@@ -43,12 +55,14 @@ func (s *Service) Ping() error {
 	return s.storage.Ping()
 }
 
-// GetStore возвращает хранилище для доступа к интерфейсу Storage
+// GetStore возвращает хранилище для прямого доступа к интерфейсу Storage.
+// Используется в обработчиках, которым нужны методы, отсутствующие в Service.
 func (s *Service) GetStore() storage.Storage {
 	return s.storage
 }
 
-// Get возвращает оригинальный URL по shortID
+// Get возвращает оригинальный URL по его короткому идентификатору.
+// Возвращает ErrDeletedGone, если URL был удалён пользователем.
 func (s *Service) Get(ctx context.Context, shortID string) (string, error) {
 	url, err := s.storage.Get(ctx, shortID)
 	if err != nil {
@@ -60,12 +74,15 @@ func (s *Service) Get(ctx context.Context, shortID string) (string, error) {
 	return url, nil
 }
 
-// Save saves the original URL and returns the short ID
+// Save сокращает originalURL и возвращает сгенерированный short ID.
+// Используется для анонимного сохранения без привязки к пользователю.
 func (s *Service) Save(ctx context.Context, originalURL string) (string, error) {
 	return s.SaveWithUserID(ctx, originalURL, "")
 }
 
-// SaveWithUserID saves the original URL with user ID and returns the short ID
+// SaveWithUserID сокращает originalURL и привязывает его к userID.
+// При коллизии ID выполняется до maxAttempts повторных попыток генерации.
+// Если originalURL уже существует, возвращает ErrURLAlreadyExists и существующий short ID.
 func (s *Service) SaveWithUserID(ctx context.Context, originalURL, userID string) (string, error) {
 	var lastErr error
 	for attempt := 0; attempt < maxAttempts; attempt++ {
@@ -104,24 +121,28 @@ func (s *Service) SaveWithUserID(ctx context.Context, originalURL, userID string
 	return "", fmt.Errorf("%w: %v", ErrMaxRetriesExceeded, lastErr)
 }
 
-// GetURLByUser retrieves URL by short ID
+// GetURLByUser возвращает URL по его короткому ID.
+// Используется при чтении ссылки владельцем.
 func (s *Service) GetURLByUser(ctx context.Context, shortID string) (string, error) {
 	return s.storage.Get(ctx, shortID)
 }
 
-// GetUserURLs returns all URLs for the given user ID
+// GetUserURLs возвращает все сокращённые URL пользователя.
+// Возвращает пустой слайс, если у пользователя нет ссылок.
 func (s *Service) GetUserURLs(ctx context.Context, userID string) ([]storage.URLRecord, error) {
 	return s.storage.GetUserURLs(ctx, userID)
 }
 
-// DeleteUserURLs marks URLs as deleted for the given user (async operation)
+// DeleteUserURLs помечает URL пользователя как удалённые.
+// Операция выполняется асинхронно батчем в хранилище.
 func (s *Service) DeleteUserURLs(ctx context.Context, userID string, shortIDs []string) error {
 	return s.storage.DeleteUserURLs(ctx, userID, shortIDs)
 }
 
-// SaveBatch saves multiple URLs in one operation
+// SaveBatch сокращает несколько URL за один вызов.
+// Для каждого URL генерируется уникальный short ID.
+// Возвращает слайс записей с заполненными ShortURL и OriginalURL.
 func (s *Service) SaveBatch(ctx context.Context, urls []storage.URLRecord) ([]storage.URLRecord, error) {
-	// Generate short IDs for all URLs first (to maintain correlation with correlation_id)
 	records := make([]storage.URLRecord, 0, len(urls))
 	for _, rec := range urls {
 		shortID, err := generateID(length)
@@ -133,19 +154,26 @@ func (s *Service) SaveBatch(ctx context.Context, urls []storage.URLRecord) ([]st
 			OriginalURL: rec.OriginalURL,
 		})
 	}
-
-	// Save all URLs in batch
 	return s.storage.SaveBatch(ctx, records)
+}
+
+// fastCharsetIndex быстро маппит случайный байт в индекс charset
+// через таблицу предвычислений, чтобы избежать деления
+var fastCharsetIndex [256]byte
+
+func init() {
+	for i := range fastCharsetIndex {
+		fastCharsetIndex[i] = byte(charset[i%len(charset)])
+	}
 }
 
 func generateID(n int) (string, error) {
 	b := make([]byte, n)
-	_, err := rand.Read(b)
-	if err != nil {
+	if _, err := rand.Read(b); err != nil {
 		return "", err
 	}
 	for i := range b {
-		b[i] = charset[int(b[i])%len(charset)]
+		b[i] = fastCharsetIndex[b[i]]
 	}
 	return string(b), nil
 }
