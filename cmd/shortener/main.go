@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
@@ -19,10 +20,19 @@ import (
 	"github.com/tradekmv/shortener.git/pkg/registry"
 )
 
+var (
+	buildVersion = "N/A"
+	buildDate    = "N/A"
+	buildCommit  = "N/A"
+)
+
 // main — точка входа в приложение.
 // Выполняет graceful shutdown всех ресурсов перед завершением.
 func main() {
 	log := logger.New()
+
+	fmt.Printf("Build version: %s\nBuild date: %s\nBuild commit: %s\n",
+		buildVersion, buildDate, buildCommit)
 
 	reg := registry.New()
 
