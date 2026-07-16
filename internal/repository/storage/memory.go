@@ -5,20 +5,24 @@ import (
 	"sync"
 )
 
-// MemoryStorage хранит данные в памяти
+// MemoryStorage хранит данные в памяти процесса.
+// Все данные теряются при перезапуске.
+// Безопасен для конкурентного использования.
 type MemoryStorage struct {
 	mu      sync.RWMutex
 	storage map[string]string
 }
 
-// NewMemory создаёт новое хранилище в памяти
+// NewMemory создаёт новое хранилище в памяти.
+// Используется в тестах и при прототипировании.
 func NewMemory() *MemoryStorage {
 	return &MemoryStorage{
 		storage: make(map[string]string),
 	}
 }
 
-// Save сохраняет пару shortURL → originalURL
+// Save сохраняет пару (shortURL, originalURL) в памяти.
+// При коллизии возвращает ErrAlreadyExists.
 func (s *MemoryStorage) Save(ctx context.Context, shortID, originalURL string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -30,12 +34,14 @@ func (s *MemoryStorage) Save(ctx context.Context, shortID, originalURL string) e
 	return nil
 }
 
-// SaveWithUserID сохраняет URL с привязкой к userID (для MemoryStorage - просто Save)
+// SaveWithUserID сохраняет URL с привязкой к userID.
+// В MemoryStorage userID игнорируется (нет multi-user поддержки).
 func (s *MemoryStorage) SaveWithUserID(ctx context.Context, shortID, originalURL, userID string) error {
 	return s.Save(ctx, shortID, originalURL)
 }
 
-// Get возвращает originalURL по shortID
+// Get возвращает originalURL по shortID.
+// Возвращает ErrNotFound, если запись отсутствует.
 func (s *MemoryStorage) Get(ctx context.Context, shortID string) (string, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -47,7 +53,8 @@ func (s *MemoryStorage) Get(ctx context.Context, shortID string) (string, error)
 	return url, nil
 }
 
-// GetByOriginalURL returns shortURL by originalURL (stub for memory storage)
+// GetByOriginalURL возвращает shortURL по originalURL.
+// Реализация линейно сканирует map (O(n)).
 func (s *MemoryStorage) GetByOriginalURL(originalURL string) (string, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -60,54 +67,54 @@ func (s *MemoryStorage) GetByOriginalURL(originalURL string) (string, bool) {
 	return "", false
 }
 
-// SaveBatch saves multiple URLs in one operation for memory storage
+// SaveBatch сохраняет несколько URL за один вызов (с удержанием одного мьютекса).
+// Дубликаты по (shortURL, originalURL) пропускаются.
+// Заполняет переданный слайс in-place и возвращает его обрезанную часть.
 func (s *MemoryStorage) SaveBatch(ctx context.Context, urls []URLRecord) ([]URLRecord, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	result := make([]URLRecord, 0, len(urls))
+	n := 0
 	for _, rec := range urls {
 		if existingURL, ok := s.storage[rec.ShortURL]; ok {
 			if existingURL == rec.OriginalURL {
-				result = append(result, URLRecord{
-					ShortURL:    rec.ShortURL,
-					OriginalURL: rec.OriginalURL,
-				})
+				urls[n] = rec
+				n++
 			}
 			continue
 		}
 		s.storage[rec.ShortURL] = rec.OriginalURL
-		result = append(result, URLRecord{
-			ShortURL:    rec.ShortURL,
-			OriginalURL: rec.OriginalURL,
-		})
+		urls[n] = rec
+		n++
 	}
-	return result, nil
+	return urls[:n], nil
 }
 
-// Len возвращает количество записей
+// Len возвращает количество записей в хранилище.
 func (s *MemoryStorage) Len() int {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return len(s.storage)
 }
 
-// Close закрывает хранилище (пустая реализация для памяти)
+// Close освобождает ресурсы (для MemoryStorage — no-op).
 func (s *MemoryStorage) Close() error {
 	return nil
 }
 
-// Ping проверяет доступность хранилища
+// Ping всегда возвращает nil (память всегда доступна).
 func (s *MemoryStorage) Ping() error {
 	return nil
 }
 
-// GetUserURLs возвращает все URLs для указанного userID (память не поддерживает множественных пользователей)
+// GetUserURLs не поддерживается MemoryStorage.
+// Всегда возвращает (nil, nil).
 func (s *MemoryStorage) GetUserURLs(ctx context.Context, userID string) ([]URLRecord, error) {
 	return nil, nil
 }
 
-// DeleteUserURLs помечает URLs как удалённые (память не поддерживает userID, просто удаляет)
+// DeleteUserURLs удаляет записи по shortIDs.
+// MemoryStorage не различает владельцев.
 func (s *MemoryStorage) DeleteUserURLs(ctx context.Context, userID string, shortIDs []string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
