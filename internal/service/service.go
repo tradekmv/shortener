@@ -33,6 +33,7 @@ var (
 	ErrDeletedGone = errors.New("URL удалён")
 )
 
+// generate:reset
 // Service предоставляет бизнес-логику для работы с URL-ссылками.
 // Инкапсулирует хранилище и применяет правила генерации идентификаторов.
 type Service struct {
