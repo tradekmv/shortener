@@ -6,21 +6,13 @@ func (r *ShortenerHandler) Reset() {
 	if r == nil {
 		return
 	}
-
 	r.service = nil
-
 	r.baseURL = ""
-
 	r.log = nil
-
 	r.auditPub = nil
-
 	r.deleteChan = nil
-
 	r.stopChan = nil
-
 	clear(r.batchPending)
-
 	r.batchTicker = nil
 
 }
