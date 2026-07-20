@@ -26,6 +26,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"go/types"
 	"golang.org/x/tools/go/analysis"
 	"golang.org/x/tools/go/analysis/passes/inspect"
 	"golang.org/x/tools/go/ast/inspector"
@@ -41,36 +42,48 @@ var Analyzer = &analysis.Analyzer{
 	Run:              run,
 }
 
-// isExitCall проверяет, является ли выражение вызовом os.Exit.
-func isExitCall(call *ast.CallExpr) bool {
+// isExitCall checks if the call is os.Exit using TypesInfo.
+func isExitCall(call *ast.CallExpr, info *types.Info) bool {
 	sel, ok := call.Fun.(*ast.SelectorExpr)
 	if !ok {
 		return false
 	}
+
 	ident, ok := sel.X.(*ast.Ident)
 	if !ok {
 		return false
 	}
-	return ident.Name == "os" && sel.Sel.Name == "Exit"
+
+	// Use TypesInfo.Uses to get the actual object regardless of alias
+	obj := info.Uses[ident]
+	if obj == nil {
+		return false
+	}
+
+	// Check if it's from os package
+	if pkg := obj.Pkg(); pkg != nil && pkg.Path() == "os" && sel.Sel.Name == "Exit" {
+		return true
+	}
+
+	return false
 }
 
-// findDirectExitCalls находит прямые вызовы os.Exit в теле функции.
-// Игнорирует вызовы внутри горутин, локальных функций и defer.
-func findDirectExitCalls(body *ast.BlockStmt) bool {
+// findDirectExitCalls finds direct os.Exit calls in function body.
+// Ignores calls inside goroutines, local functions, and defer.
+func findDirectExitCalls(body *ast.BlockStmt, info *types.Info) bool {
 	for _, stmt := range body.List {
-		if hasDirectExit(stmt) {
+		if hasDirectExit(stmt, info) {
 			return true
 		}
 	}
 	return false
 }
 
-// hasDirectExit проверяет наличие os.Exit в операторе,
-// игнорируя вложенные функции и горутины.
-func hasDirectExit(stmt ast.Stmt) bool {
+// hasDirectExit checks for os.Exit in statement, ignoring nested functions and goroutines.
+func hasDirectExit(stmt ast.Stmt, info *types.Info) bool {
 	switch s := stmt.(type) {
 	case *ast.ExprStmt:
-		if call, ok := s.X.(*ast.CallExpr); ok && isExitCall(call) {
+		if call, ok := s.X.(*ast.CallExpr); ok && isExitCall(call, info) {
 			return true
 		}
 
@@ -82,46 +95,46 @@ func hasDirectExit(stmt ast.Stmt) bool {
 
 	case *ast.AssignStmt:
 		for _, expr := range s.Rhs {
-			if hasExitInExpr(expr) {
+			if hasExitInExpr(expr, info) {
 				return true
 			}
 		}
 
 	case *ast.IfStmt:
-		if hasDirectExit(s.Body) {
+		if hasDirectExit(s.Body, info) {
 			return true
 		}
 		if s.Else != nil {
-			return hasDirectExit(s.Else)
+			return hasDirectExit(s.Else, info)
 		}
 
 	case *ast.ForStmt:
-		return hasDirectExit(s.Body)
+		return hasDirectExit(s.Body, info)
 
 	case *ast.RangeStmt:
-		return hasDirectExit(s.Body)
+		return hasDirectExit(s.Body, info)
 
 	case *ast.BlockStmt:
 		for _, inner := range s.List {
-			if hasDirectExit(inner) {
+			if hasDirectExit(inner, info) {
 				return true
 			}
 		}
 
 	case *ast.LabeledStmt:
-		return hasDirectExit(s.Stmt)
+		return hasDirectExit(s.Stmt, info)
 	}
 
 	return false
 }
 
-// hasExitInExpr проверяет наличие os.Exit в выражении.
-func hasExitInExpr(expr ast.Expr) bool {
+// hasExitInExpr checks for os.Exit in expression.
+func hasExitInExpr(expr ast.Expr, info *types.Info) bool {
 	call, ok := expr.(*ast.CallExpr)
 	if !ok {
 		return false
 	}
-	return isExitCall(call)
+	return isExitCall(call, info)
 }
 
 func run(pass *analysis.Pass) (interface{}, error) {
@@ -166,7 +179,9 @@ func run(pass *analysis.Pass) (interface{}, error) {
 			return
 		}
 
-		if findDirectExitCalls(funcDecl.Body) {
+		info := pass.TypesInfo
+
+		if findDirectExitCalls(funcDecl.Body, info) {
 			pass.Report(analysis.Diagnostic{
 				Pos:     funcDecl.Pos(),
 				Message: "os.Exit called directly in main function of main package",

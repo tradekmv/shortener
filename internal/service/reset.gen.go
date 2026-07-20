@@ -6,7 +6,6 @@ func (r *Service) Reset() {
 	if r == nil {
 		return
 	}
-
 	if res, ok := interface{}(r.storage).(interface{ Reset() }); ok {
 		res.Reset()
 	}

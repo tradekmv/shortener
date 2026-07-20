@@ -1,5 +1,10 @@
-// Package reset provides a generic Pool with Reset() support.
+// Package reset provides a generic Pool with Reset() support using sync.Pool.
 package reset
+
+import (
+	"reflect"
+	"sync"
+)
 
 // Resetter — интерфейс для типов с методом Reset()
 type Resetter interface {
@@ -7,38 +12,45 @@ type Resetter interface {
 }
 
 // Pool — пул объектов типа T с поддержкой сброса состояния.
+// Реализован на основе sync.Pool: объекты кооперируются с GC,
+// а поле New автоматически создаёт объект при пустом пуле.
 // Тип T ограничен интерфейсом Resetter.
 type Pool[T Resetter] struct {
-	pool chan T
+	pool sync.Pool
 }
 
-// New создаёт и возвращает указатель на Pool.
+// New creates and returns a Pool.
+// The size parameter is accepted for API compatibility but has no effect:
+// sync.Pool manages its own internal size adaptively.
 func New[T Resetter](size int) *Pool[T] {
+	var zero T
+
 	return &Pool[T]{
-		pool: make(chan T, size),
+		pool: sync.Pool{
+			New: func() interface{} {
+				// Handle pointer types: new(T) returns **Type for pointer T
+				// We need to allocate the underlying type directly
+				if reflect.TypeOf(zero).Kind() == reflect.Ptr {
+					v := reflect.New(reflect.TypeOf(zero).Elem())
+					return v.Interface()
+				}
+				// Value types: new(T) works correctly
+				t := new(T)
+				return t
+			},
+		},
 	}
 }
 
-// Get возвращает объект из пула.
-// Если пул пуст, возвращает zero-значение типа T.
+// Get returns an object from the pool.
+// If the pool is empty, New creates a new object automatically.
 func (p *Pool[T]) Get() T {
-	select {
-	case obj := <-p.pool:
-		return obj
-	default:
-		var zero T
-		return zero
-	}
+	return p.pool.Get().(T)
 }
 
-// Put помещает объект в пул.
-// Перед помещением вызывает Reset() для сброса состояния.
+// Put places an object into the pool.
+// Reset() is called before putting to clear the state.
 func (p *Pool[T]) Put(obj T) {
 	obj.Reset()
-
-	select {
-	case p.pool <- obj:
-	default:
-		// Пул полон, объект отбрасывается
-	}
+	p.pool.Put(obj)
 }
