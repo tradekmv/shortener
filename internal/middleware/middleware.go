@@ -1,3 +1,5 @@
+// Package middleware предоставляет HTTP-middleware для сервиса сокращения URL:
+// сжатие/распаковку gzip и структурное логирование запросов.
 package middleware
 
 import (
@@ -10,7 +12,13 @@ import (
 	"github.com/rs/zerolog"
 )
 
-// LoggingMiddleware создаёт middleware логирования с переданным логгером
+// GzipMiddleware обрабатывает сжатые тела запросов и сжимает ответы.
+//
+// На входе: распаковывает body, если Content-Encoding: gzip.
+// На выходе: сжимает body, если Accept-Encoding содержит gzip
+// и метод запроса POST или PUT.
+//
+// При невалидном gzip в теле запроса возвращает 400 Bad Request.
 func GzipMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Обработка сжатого тела запроса
@@ -72,7 +80,8 @@ func (grw *gzipResponseWriter) close() {
 	grw.gz.Close()
 }
 
-// LoggingMiddleware логирует HTTP-запросы и ответы
+// LoggingMiddleware логирует каждый HTTP-запрос и ответ.
+// В лог пишется URI, метод, длительность, статус-код и размер тела ответа.
 func LoggingMiddleware(next http.Handler, log *zerolog.Logger) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
