@@ -41,6 +41,7 @@ type BatchResponseItem struct {
 	ShortURL      string `json:"short_url"`
 }
 
+// generate:reset
 // ShortenerHandler обрабатывает HTTP-запросы для сокращения URL.
 // Реализует батчинг запросов на удаление для повышения производительности.
 type ShortenerHandler struct {

@@ -45,7 +45,9 @@ func ExampleGetUserIDFromCookie() {
 	}
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
-	req.AddCookie(w.Result().Cookies()[0])
+	res := w.Result()
+	defer res.Body.Close()
+	req.AddCookie(res.Cookies()[0])
 
 	userID, err := auth.GetUserIDFromCookie(req)
 	if err != nil {

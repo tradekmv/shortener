@@ -18,7 +18,9 @@ func TestSignCookie_Success(t *testing.T) {
 	if err := SignCookie(w, "user-123"); err != nil {
 		t.Fatalf("неожиданная ошибка: %v", err)
 	}
-	cookies := w.Result().Cookies()
+	result := w.Result()
+	defer result.Body.Close()
+	cookies := result.Cookies()
 	if len(cookies) != 1 {
 		t.Fatalf("ожидалась 1 кука, получено %d", len(cookies))
 	}
@@ -79,7 +81,9 @@ func TestCreateUserIDIfNeeded_NoCookie_Creates(t *testing.T) {
 	if uid == "" {
 		t.Error("ожидался непустой userID")
 	}
-	if len(w.Result().Cookies()) != 1 {
+	result := w.Result()
+	defer result.Body.Close()
+	if len(result.Cookies()) != 1 {
 		t.Error("ожидалась установленная кука")
 	}
 }
@@ -90,7 +94,9 @@ func TestCreateUserIDIfNeeded_ValidCookie_Returns(t *testing.T) {
 	uid1, _ := CreateUserIDIfNeeded(w, r)
 	w2 := httptest.NewRecorder()
 	r2 := httptest.NewRequest(http.MethodGet, "/", nil)
-	for _, c := range w.Result().Cookies() {
+	result1 := w.Result()
+	defer result1.Body.Close()
+	for _, c := range result1.Cookies() {
 		r2.AddCookie(c)
 	}
 	uid2, err := CreateUserIDIfNeeded(w2, r2)
